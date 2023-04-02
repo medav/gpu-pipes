@@ -4,10 +4,10 @@ CUTLASS_INC=$(CUTLASS_PATH)/include
 CUTLASS_LIB=$(CUTLASS_PATH)/build/tools/library
 
 LIBS?=
-LIBS+=-L$(CUTLASS_LIB) -lcutlass
+LIBS+=-L$(CUTLASS_LIB)
 
 INCS?=
-INCS+=-I$(CUTLASS_INC)
+INCS+=-I$(CUTLASS_INC) -I$(CUTLASS_PATH)/tools/util/include/
 INCS+=-I$(CUTLASS_PATH)/tools/util/include
 
 
@@ -16,6 +16,7 @@ INCS+=-I$(CUTLASS_PATH)/tools/util/include
 default: run
 
 HDRS=$(wildcard *.cuh)
+# APP=test_mgn_node_pipe
 APP=test_2sm_gemm_pipe
 
 $(APP): $(APP).cu $(HDRS)
