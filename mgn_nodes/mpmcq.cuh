@@ -2,6 +2,13 @@
 
 typedef unsigned long size_t;
 
+
+__device__ bool is_master() {
+    return threadIdx.x == 0 && threadIdx.y == 0;
+}
+
+#define DEBUG 0
+
 template<typename T, size_t N, size_t NP, size_t NC>
 struct QueueSlot {
     using Item = T;
@@ -9,6 +16,7 @@ struct QueueSlot {
     volatile int read_done;
     volatile int write_done;
     Item data;
+
 
     __device__ QueueSlot() : read_done(0), write_done(0), data() {}
 
@@ -22,17 +30,15 @@ struct QueueSlot {
     __device__ bool filled() const { return write_done == NC; }
     __device__ bool drained() const { return read_done == NP && write_done == NC; }
 
-    __device__ void commit_write(int lane_id) {
-        if (lane_id == 0) {
-            // printf("COMMIT WRITE seq_n: %lu, slot: %lu\n", seq_n, seq_n % N);
+    __device__ void commit_write() {
+        if (is_master()) {
             atomicAdd((int *)&write_done, 1);
         }
-        __syncwarp();
+        __syncthreads();
     }
 
-    __device__ void commit_read(int lane_id) {
-        if (lane_id == 0) {
-            // printf("COMMIT READ seq_n: %lu, slot: %lu\n", seq_n, seq_n % N);
+    __device__ void commit_read() {
+        if (is_master()) {
             int old = atomicAdd((int *)&read_done, 1);
 
             if (old == NC - 1) {
@@ -41,7 +47,7 @@ struct QueueSlot {
                 write_done = 0;
             }
         }
-        __syncwarp();
+        __syncthreads();
     }
 
 };
@@ -57,37 +63,47 @@ private:
 public:
 
     __device__ void reset() {
-        for (int i = 0; i < N; i++) {
-            slots[i].reset(i);
+        if (is_master()) {
+            for (int i = 0; i < N; i++) {
+                slots[i].reset(i);
+            }
         }
+        __syncthreads();
     }
 
-    __device__ MpmcRingQueue() : slots{} {
-        reset();
-    }
+    __device__ MpmcRingQueue() : slots{} { }
 
-    __device__ Slot& allocate(int seq_n, int lane_id) {
+    __device__ Slot& allocate(int seq_n) {
         Slot& slot = slots[seq_n % N];
-        if (lane_id == 0) {
+        if (is_master()) {
             while (slot.seq_n != seq_n) { /* spin */ }
         }
-        __syncwarp();
+        __syncthreads();
         return slot;
     }
 
-    __device__ Slot& write_wait(int seq_n, int lane_id) {
-        // if (lane_id == 0) printf("WRITE seq_n: %d, slot: %d\n", seq_n, (int)(seq_n % N));
-        Slot& slot = allocate(seq_n, lane_id);
+    __device__ Slot& write_wait(int seq_n) {
+        Slot& slot = allocate(seq_n);
         return slot;
     }
 
-    __device__ Slot& read_wait(int seq_n, int lane_id) {
-        // if (lane_id == 0) printf("READ seq_n: %d, slot: %d\n", seq_n, (int)(seq_n % N));
-        Slot& slot = allocate(seq_n, lane_id);
-        if (lane_id == 0) {
+    __device__ void write_commit(int seq_n) {
+        Slot& slot = allocate(seq_n);
+        slot.commit_write();
+    }
+
+    __device__ Slot& read_wait(int seq_n) {
+        Slot& slot = allocate(seq_n);
+        if (is_master()) {
             while (!slot.filled()) { /* spin */ }
         }
-        __syncwarp();
+
+        __syncthreads();
         return slot;
+    }
+
+    __device__ void read_commit(int seq_n) {
+        Slot& slot = allocate(seq_n);
+        slot.commit_read();
     }
 };

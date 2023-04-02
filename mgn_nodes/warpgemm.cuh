@@ -19,7 +19,8 @@ template <
     typename Shape,
     typename LayoutA,
     typename LayoutB,
-    typename LayoutC>
+    typename LayoutC,
+    bool load_C>
 class GemmTensorOp
 {
 public:
@@ -71,10 +72,10 @@ public:
     void operator()(
         TensorRefA ref_A,
         TensorRefB ref_B,
-        TensorRefC ref_C,
+        TensorRefC ref_C_in,
+        TensorRefC ref_C_out,
         int lane_id) const
     {
-
         // Instantiate iterators pointing to slices of the A and B matrices in shared memory
         typename MmaWarp::IteratorA iter_A(ref_A, lane_id);
         typename MmaWarp::IteratorB iter_B(ref_B, lane_id);
@@ -101,10 +102,7 @@ public:
 
         // Load fragments from shared memory
         CUTLASS_PRAGMA_UNROLL
-        for (int k = 0; k < kKgroups; ++k)
-        {
-
-            // Load fragments from shared memory
+        for (int k = 0; k < kKgroups; ++k) {
             iter_A.load(frag_A[(k + 1) % 2]);
             iter_B.load(frag_B[(k + 1) % 2]);
 
@@ -116,24 +114,44 @@ public:
             // mma_op(accum, frag_A[0], frag_B[0], accum);
         }
 
-        // Instantiate iterators
-        FragmentIterator accum_frag_it(accum);
-        AccumulatorTileIterator source_tile_it(ref_C, {Shape::kM, Shape::kN}, lane_id);
+        if (load_C) {
+            FragmentIterator accum_frag_it(accum);
+            AccumulatorTileIterator source_tile_it(ref_C_in, {Shape::kM, Shape::kN}, lane_id);
+            AccumulatorTileIterator dest_tile_it(ref_C_out, {Shape::kM, Shape::kN}, lane_id);
 
+            cutlass::plus<typename FragmentIterator::Fragment> add_accumulator;
 
-        // Iterate over the epilogue components
-        CUTLASS_PRAGMA_UNROLL
-        for (int idx = 0; idx < FragmentIterator::kIterations; ++idx)
-        {
-            // Define storage for slices of the accumulators
-            typename FragmentIterator::Fragment accum_fragment;
+            CUTLASS_PRAGMA_UNROLL
+            for (int idx = 0; idx < FragmentIterator::kIterations; ++idx) {
+                typename FragmentIterator::Fragment accum_fragment;
+                typename FragmentIterator::Fragment source_fragment;
 
-            // Select a slice of accumulators from the accumulator tile
-            accum_frag_it.load(accum_fragment);
+                accum_frag_it.load(accum_fragment);
+                ++accum_frag_it;
 
-            // Store the result to shared memory
-            source_tile_it.store(accum_fragment);
-            ++source_tile_it;
+                source_tile_it.load(source_fragment);
+                ++source_tile_it;
+
+                accum_fragment = add_accumulator(accum_fragment, source_fragment);
+
+                dest_tile_it.store(accum_fragment);
+                ++dest_tile_it;
+            }
+        }
+        else {
+            FragmentIterator accum_frag_it(accum);
+            AccumulatorTileIterator dest_tile_it(ref_C_out, {Shape::kM, Shape::kN}, lane_id);
+
+            CUTLASS_PRAGMA_UNROLL
+            for (int idx = 0; idx < FragmentIterator::kIterations; ++idx) {
+                typename FragmentIterator::Fragment accum_fragment;
+
+                accum_frag_it.load(accum_fragment);
+                ++accum_frag_it;
+
+                dest_tile_it.store(accum_fragment);
+                ++dest_tile_it;
+            }
         }
     }
 };
