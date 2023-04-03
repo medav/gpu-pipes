@@ -49,13 +49,13 @@ __global__ void kernel(MgnNodeMlp * prob) {
             mlp0_sm0(smem, prob);
             break;
         case 1:
-            mlp0_sm1(smem, prob);
+            // mlp0_sm1(smem, prob);
             break;
         case 2:
-            mlp0_sm2(smem, prob);
+            // mlp0_sm2(smem, prob);
             break;
         case 3:
-            consume_dummy(prob->q12, MgnNodeMlp::m / MgnNodeMlp::mblk);
+            consume_dummy(prob->q1[0], MgnNodeMlp::m / MgnNodeMlp::mblk);
             break;
         case 4:
 
@@ -77,7 +77,9 @@ int main() {
         kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, max_smem));
 
     MgnNodeMlp * prob;
-    cudaErrCheck(cudaMallocManaged(&prob, sizeof(MgnNodeMlp)));
+    cudaErrCheck(cudaMalloc(&prob, sizeof(MgnNodeMlp) + 128));
+    // Align prob
+    prob = (MgnNodeMlp*)(((size_t)prob + 0x3F) & ~0x3F);
 
     printf("Init...\n");
     init_prob<<<1, 128>>>(prob);
