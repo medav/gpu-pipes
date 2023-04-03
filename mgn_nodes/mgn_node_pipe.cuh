@@ -43,7 +43,7 @@ struct MgnNodeMlp {
     half out[m][d];
 
     static const size_t mblk = 64;
-    static const size_t num_warps = 16;
+    static const size_t num_warps = 8;
 
     static const size_t s1_qlen = 4;
     static const size_t s12_qlen = 4;

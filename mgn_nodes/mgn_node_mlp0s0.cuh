@@ -7,11 +7,11 @@ class Mlp0s0 {
 public:
     using Block = Block_;
 
-    static const size_t num_warps = NumWarps_;
-    static const size_t nblk_per_warp = Block::kK / num_warps;
-    static const size_t read_bytes = Block::kM * Block::kK * sizeof(half);
-    static const size_t write_bytes = Block::kM * Block::kN * sizeof(half);
-    static const size_t buf_len = 3;
+    static constexpr size_t num_warps = NumWarps_;
+    static constexpr size_t nblk_per_warp = Block::kK / num_warps;
+    static constexpr size_t read_bytes = Block::kM * Block::kK * sizeof(half);
+    static constexpr size_t write_bytes = Block::kM * Block::kN * sizeof(half);
+    static constexpr size_t buf_len = 3;
 
     using GemmOp = ThreadBlockGemmTensorOp<
         num_warps, cutlass::gemm::GemmShape<Block::kM, Block::kN, Block::kK>>;
@@ -58,35 +58,32 @@ public:
         }
     }
 
-    template<typename PT>
-    __device__ void read_input(PT& cu_pipe, ssize_t seq_n_, half * input) {
+    __device__ void read_input(ssize_t seq_n_, half * input) {
         if (seq_n_ >= num_iters) return;
         const size_t mbase = seq_n_ * Block::kM;
 
-        cuda::memcpy_async(
+        cooperative_groups::memcpy_async(
             this_block,
             (void *)&buf->in[seq_n_ % buf_len][0][0],
             (void *)&input[mbase * Block::kK],
-            Block::kM * Block::kK * sizeof(half),
-            cu_pipe
+            Block::kM * Block::kK * sizeof(half)
         );
     };
 
-    template<typename PT>
-    __device__ void read_accum(PT& cu_pipe, ssize_t seq_n_) { };
+    __device__ void read_accum(ssize_t seq_n_) { };
 
-    template<typename PT, typename QT>
-    __device__ void write_output(PT& cu_pipe, ssize_t seq_n_, QT& out_q) {
+    template<typename QT>
+    __device__ void write_output(ssize_t seq_n_, QT& out_q) {
         if (seq_n_ < 0) return;
+        const size_t wbytes = write_bytes;
 
         auto& slot = out_q.write_wait(seq_n_);
-        cuda::memcpy_async(
-            this_block,
-            (void *)&slot.data.buf[0][0],
-            (void *)&buf->out[seq_n_ % buf_len][0][0],
-            write_bytes,
-            cu_pipe
-        );
+        // cooperative_groups::memcpy_async(
+        //     this_block,
+        //     (void *)&slot.data.buf[0][0],
+        //     (void *)&buf->out[seq_n_ % buf_len][0][0],
+        //     wbytes
+        // );
     };
 
     __device__ void read_commit(ssize_t seq_n_) { }
@@ -100,41 +97,33 @@ public:
     __device__ void compute(ssize_t seq_n_) {
         if (seq_n_ >= num_iters) return;
         size_t bufi = seq_n_ % buf_len;
-        gemm_op(
-            (cutlass::half_t *)&buf->in[bufi][0][0],
-            (cutlass::half_t *)&buf->weight[0][0],
-            (cutlass::half_t *)&buf->out[bufi][0][0],
-            warp_id,
-            lane_id);
+        // gemm_op(
+        //     (cutlass::half_t *)&buf->in[bufi][0][0],
+        //     (cutlass::half_t *)&buf->weight[0][0],
+        //     (cutlass::half_t *)&buf->out[bufi][0][0],
+        //     warp_id,
+        //     lane_id);
     };
 
 
     template<typename QT>
     __device__ void run(half * weight, half * input, QT& out_q) {
-        auto cu_pipe = cuda::make_pipeline(this_block, &buf->shared_state);
-
         out_q.reset();
 
         load_weights_async(weight);
         this_block.sync();
 
-        cu_pipe.producer_acquire();
-        read_input(cu_pipe, 0, input);
-        read_accum(cu_pipe, 0);
-        cu_pipe.producer_commit();
+        read_input(0, input); // Asynchornous / Non-Blocking
+        read_accum(0);        // Asynchornous / Non-Blocking
 
-        for (ssize_t seq_n = 1; seq_n < num_iters + 2; seq_n++) {
-            cu_pipe.producer_acquire();
-            read_input(cu_pipe, seq_n, input);
-            read_accum(cu_pipe, seq_n);
-            write_output(cu_pipe, seq_n - 2, out_q);
-            cu_pipe.producer_commit();
-
-            cu_pipe.consumer_wait();
-            read_commit(seq_n - 1);
-            compute(seq_n - 1);
-            write_commit(seq_n - 2, out_q);
-            cu_pipe.consumer_release();
+        for (ssize_t seq_n = 1; seq_n < num_iters + 3; seq_n++) {
+            this_block.sync();              // Barrier
+            read_commit(seq_n - 1);         // Non-blocking
+            write_commit(seq_n - 3, out_q); // Non-blocking
+            read_input(seq_n, input);       // Asynchornous / Non-Blocking
+            read_accum(seq_n);              // Asynchornous / Non-Blocking
+            write_output(seq_n - 2, out_q); // Asynchornous / Non-Blocking
+            compute(seq_n - 1);             // Blocks
         }
     }
 };

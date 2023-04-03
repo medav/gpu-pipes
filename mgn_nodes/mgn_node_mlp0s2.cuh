@@ -57,45 +57,43 @@ public:
         }
     }
 
-    template<typename PT>
-    __device__ void read_input(PT& cu_pipe, ssize_t seq_n_, half * input) {
+    __device__ void read_input(ssize_t seq_n_, half * input) {
         if (seq_n_ >= num_iters) return;
         const size_t mbase = seq_n_ * Block::kM;
 
-        cuda::memcpy_async(
+        cooperative_groups::memcpy_async(
             this_block,
             (void *)&buf->in[seq_n_ % buf_len][0][0],
             (void *)&input[mbase * Block::kK],
-            Block::kM * Block::kK * sizeof(half),
-            cu_pipe
+            Block::kM * Block::kK * sizeof(half)
         );
     };
 
-    template<typename PT, typename QT>
-    __device__ void read_accum(PT& cu_pipe, ssize_t seq_n_, QT& in_q) {
+    template<typename QT>
+    __device__ void read_accum(ssize_t seq_n_, QT& in_q) {
         if (seq_n_ >= num_iters) return;
+        const size_t wbytes = write_bytes;
 
         auto& slot = in_q.read_wait(seq_n_);
-        cuda::memcpy_async(
+        cooperative_groups::memcpy_async(
             this_block,
             (void *)&slot.data.buf[0][0],
             (void *)&buf->out[seq_n_ % buf_len][0][0],
-            write_bytes,
-            cu_pipe
+            wbytes
         );
     };
 
-    template<typename PT, typename QT>
-    __device__ void write_output(PT& cu_pipe, ssize_t seq_n_, QT& out_q) {
+    template<typename QT>
+    __device__ void write_output(ssize_t seq_n_, QT& out_q) {
         if (seq_n_ < 0) return;
+        const size_t wbytes = write_bytes;
 
         auto& slot = out_q.write_wait(seq_n_);
-        cuda::memcpy_async(
+        cooperative_groups::memcpy_async(
             this_block,
             (void *)&slot.data.buf[0][0],
             (void *)&buf->out[seq_n_ % buf_len][0][0],
-            write_bytes,
-            cu_pipe
+            wbytes
         );
     };
 
@@ -114,41 +112,36 @@ public:
     __device__ void compute(ssize_t seq_n_) {
         if (seq_n_ >= num_iters) return;
         size_t bufi = seq_n_ % buf_len;
-        gemm_op(
-            (cutlass::half_t *)&buf->in[bufi][0][0],
-            (cutlass::half_t *)&buf->weight[0][0],
-            (cutlass::half_t *)&buf->out[bufi][0][0],
-            warp_id,
-            lane_id);
+        // gemm_op(
+        //     (cutlass::half_t *)&buf->in[bufi][0][0],
+        //     (cutlass::half_t *)&buf->weight[0][0],
+        //     (cutlass::half_t *)&buf->out[bufi][0][0],
+        //     warp_id,
+        //     lane_id);
     };
 
 
     template<typename QIN, typename QOUT>
     __device__ void run(half * weight, half * input, QIN& accum_in_q, QOUT& out_q) {
-        auto cu_pipe = cuda::make_pipeline(this_block, &buf->shared_state);
-
         out_q.reset();
 
         load_weights_async(weight);
         this_block.sync();
 
-        cu_pipe.producer_acquire();
-        read_input(cu_pipe, 0, input);
-        read_accum(cu_pipe, 0, accum_in_q);
-        cu_pipe.producer_commit();
+        read_input(0, input);
+        read_accum(0, accum_in_q);
 
-        for (ssize_t seq_n = 1; seq_n < num_iters + 2; seq_n++) {
-            cu_pipe.producer_acquire();
-            read_input(cu_pipe, seq_n, input);
-            read_accum(cu_pipe, seq_n, accum_in_q);
-            write_output(cu_pipe, seq_n - 2, out_q);
-            cu_pipe.producer_commit();
-
-            cu_pipe.consumer_wait();
+        for (ssize_t seq_n = 1; seq_n < num_iters + 3; seq_n++) {
+            this_block.sync();
             read_commit(seq_n - 1, accum_in_q);
+            write_commit(seq_n - 3, out_q);
+
+            read_input(seq_n, input);
+            read_accum(seq_n, accum_in_q);
+
+            write_output(seq_n - 2, out_q);
+
             compute(seq_n - 1);
-            write_commit(seq_n - 2, out_q);
-            cu_pipe.consumer_release();
         }
     }
 };
