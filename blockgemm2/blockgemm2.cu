@@ -4,6 +4,7 @@
 #include "cutlass/gemm/warp/default_mma_tensor_op.h"
 #include "cutlass/gemm/threadblock/default_mma.h"
 #include "cutlass/gemm/threadblock/default_mma_core.h"
+#include "cutlass/gemm/threadblock/mma_pipelined.h"
 #include "cutlass/epilogue/collective/default_epilogue.hpp"
 #include "cutlass/epilogue/thread/linear_combination.h"
 #include "cutlass/epilogue/warp/fragment_iterator_tensor_op.h"
@@ -14,7 +15,7 @@
 #include "utils.cuh"
 
 #define NI 1000000
-#define M 64
+#define M 32
 #define N 128
 #define K 128
 
@@ -28,7 +29,7 @@ using ElementC = cutlass::half_t;
 using LayoutC = cutlass::layout::RowMajor;
 
 
-using ThreadblockShape = cutlass::gemm::GemmShape<16, 32, 64>;
+using ThreadblockShape = cutlass::gemm::GemmShape<16, 16, 64>;
 using WarpShape = cutlass::gemm::GemmShape<16, 8, 64>;
 using InstructionShape = cutlass::gemm::GemmShape<16, 8, 16>;
 
@@ -59,18 +60,29 @@ using ThreadMapB = typename MmaCore::IteratorThreadMapB;
 using AccessTypeA = cutlass::Array<ElementA, ThreadMapA::kElementsPerAccess>;
 using AccessTypeB = cutlass::Array<ElementB, ThreadMapB::kElementsPerAccess>;
 
-constexpr cutlass::arch::CacheOperation::Kind const CacheOpA = MmaCore::kCacheOpA;
-constexpr cutlass::arch::CacheOperation::Kind const CacheOpB = cutlass::arch::CacheOperation::Always;
+constexpr cutlass::arch::CacheOperation::Kind const CacheOpA =
+    cutlass::arch::CacheOperation::Global;
+
+constexpr cutlass::arch::CacheOperation::Kind const CacheOpB =
+    cutlass::arch::CacheOperation::Always;
 
 // Define iterators over tiles from the A operand
 using IteratorA = cutlass::transform::threadblock::PredicatedTileAccessIterator<
     cutlass::MatrixShape<ThreadblockShape::kM, ThreadblockShape::kK>,
-    ElementA, LayoutA, 1, ThreadMapA, AccessTypeA>;
+    ElementA,
+    LayoutA,
+    0,
+    ThreadMapA,
+    AccessTypeA>;
 
 // Define iterators over tiles from the B operand
 using IteratorB = cutlass::transform::threadblock::PredicatedTileAccessIterator<
     cutlass::MatrixShape<ThreadblockShape::kK, ThreadblockShape::kN>,
-    ElementB, LayoutB, 0, ThreadMapB, AccessTypeB>;
+    ElementB,
+    LayoutB,
+    0,
+    ThreadMapB,
+    AccessTypeB>;
 
 // Define the threadblock-scoped pipelined matrix multiply
 using Mma = cutlass::gemm::threadblock::MmaMultistage<
