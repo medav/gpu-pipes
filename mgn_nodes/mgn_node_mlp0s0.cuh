@@ -78,12 +78,12 @@ public:
         const size_t wbytes = write_bytes;
 
         auto& slot = out_q.write_wait(seq_n_);
-        // cooperative_groups::memcpy_async(
-        //     this_block,
-        //     (void *)&slot.data.buf[0][0],
-        //     (void *)&buf->out[seq_n_ % buf_len][0][0],
-        //     wbytes
-        // );
+        cooperative_groups::memcpy_async(
+            this_block,
+            (void *)&slot.data.buf[0][0],
+            (void *)&buf->out[seq_n_ % buf_len][0][0],
+            wbytes
+        );
     };
 
     __device__ void read_commit(ssize_t seq_n_) { }
