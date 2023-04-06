@@ -117,12 +117,12 @@ __device__ void gemmpipe(
 
         ar.read_release();
 
-        // gemm_op(
-        //     CLD(ProblemShape::kK, Mma::Shape::kK),
-        //     accum,
-        //     iterator_A,
-        //     iterator_B,
-        //     accum);
+        gemm_op(
+            CLD(ProblemShape::kK, Mma::Shape::kK),
+            accum,
+            iterator_A,
+            iterator_B,
+            accum);
 
         ir.read_release();
 
