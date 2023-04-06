@@ -132,16 +132,15 @@ public:
         read_accum(0, accum_in_q);
 
         for (ssize_t seq_n = 1; seq_n < num_iters + 3; seq_n++) {
-            this_block.sync();
-            read_commit(seq_n - 1, accum_in_q);
-            write_commit(seq_n - 3, out_q);
+            this_block.sync();              // Barrier
+            read_commit(seq_n - 1, accum_in_q);         // Non-blocking
+            write_commit(seq_n - 3, out_q); // Non-blocking
 
-            read_input(seq_n, input);
-            read_accum(seq_n, accum_in_q);
+            read_input(seq_n, input);       // Asynchronous / Non-Blocking
+            read_accum(seq_n, accum_in_q);              // Asynchronous / Non-Blocking
+            write_output(seq_n - 2, out_q); // Asynchronous / Non-Blocking
 
-            write_output(seq_n - 2, out_q);
-
-            compute(seq_n - 1);
+            compute(seq_n - 1);             // Blocks
         }
     }
 };

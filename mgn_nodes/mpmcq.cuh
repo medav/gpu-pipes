@@ -13,8 +13,14 @@ template<typename T, size_t N, size_t NP, size_t NC>
 struct QueueSlot {
     using Item = T;
     int seq_n;
+    int pad0;
+    size_t pad00[7];
     int read_done;
+    int pad1;
+    size_t pad11[7];
     int write_done;
+    int pad2;
+    size_t pad22[7];
     Item data;
 
 
@@ -74,7 +80,7 @@ public:
     __device__ Slot& allocate(int seq_n) {
         Slot& slot = slots[seq_n % N];
         if (is_master()) {
-            while (atomicAdd(&slot.seq_n, (int)0) != seq_n) { }
+            while (atomicAdd(&slot.seq_n, (int)0) != seq_n) { __nanosleep(10000); }
         }
         __syncthreads();
         return slot;
@@ -93,7 +99,7 @@ public:
     __device__ Slot& read_wait(int seq_n) {
         Slot& slot = allocate(seq_n);
         if (is_master()) {
-            while (atomicAdd(&slot.write_done, (int)0) != NP) { }
+            while (atomicAdd(&slot.write_done, (int)0) != NP) { __nanosleep(10000); }
         }
 
         __syncthreads();
