@@ -5,6 +5,16 @@
 #include "cutlass/gemm/threadblock/default_mma.h"
 #include "cutlass/gemm/threadblock/default_mma_core.h"
 #include "cutlass/gemm/threadblock/mma_pipelined.h"
+
+#include "cutlass/arch/wmma.h"
+#include "cutlass/numeric_types.h"
+#include "cutlass/arch/arch.h"
+#include "cutlass/arch/mma.h"
+#include "cutlass/layout/matrix.h"
+#include "cutlass/gemm/device/gemm.h"
+#include "cutlass/gemm/device/gemm_universal_adapter.h"
+#include "cutlass/gemm/kernel/default_gemm_universal.h"
+
 #include "cutlass/epilogue/collective/default_epilogue.hpp"
 #include "cutlass/epilogue/thread/linear_combination.h"
 #include "cutlass/epilogue/warp/fragment_iterator_tensor_op.h"
@@ -17,99 +27,33 @@
 #define NI 1000000
 #define M 256
 #define N 128
-#define K 32
+#define K 128
 
-// using WarpShape = cutlass::gemm::GemmShape<32, 16, 64>;
-
-using ElementA = cutlass::half_t;
-using LayoutA  = cutlass::layout::ColumnMajor;
-using ElementB = cutlass::half_t;
-using LayoutB  = cutlass::layout::RowMajor;
-using ElementC = cutlass::half_t;
-using LayoutC  = cutlass::layout::ColumnMajor;
-
-
-using ThreadblockShape = cutlass::gemm::GemmShape<M, N, 32>;
-using WarpShape        = cutlass::gemm::GemmShape<M / 4, N / 2, 32>;
-using InstructionShape = cutlass::gemm::GemmShape<16, 8, 16>;
-
-constexpr int Stages = 3;
-
-// Define the MmaCore components
-using MmaCore = typename cutlass::gemm::threadblock::DefaultMmaCore<
-    ThreadblockShape,
-    WarpShape,
-    InstructionShape,
-    ElementA, LayoutA,
-    ElementB, LayoutB,
-    ElementC, LayoutC,
+using Kernel = typename cutlass::gemm::kernel::DefaultGemmUniversal<
+    cutlass::half_t, cutlass::layout::ColumnMajor, cutlass::ComplexTransform::kNone, 8,    // transposed B operand
+    cutlass::half_t, cutlass::layout::RowMajor, cutlass::ComplexTransform::kNone, 8,    // transposed A operand
+    cutlass::half_t, cutlass::layout::RowMajor,
+    cutlass::half_t,
     cutlass::arch::OpClassTensorOp,
-    Stages>;
+    cutlass::arch::Sm80,
+    cutlass::gemm::GemmShape<256, 128, 32>,
+    cutlass::gemm::GemmShape<64, 64, 32>,
+    cutlass::gemm::GemmShape<16, 8, 16>,
+    cutlass::epilogue::thread::LinearCombination<
+      cutlass::half_t,
+      8,
+      cutlass::half_t,
+      cutlass::half_t
+    >,
+    cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<8>,
+    3,
+    cutlass::arch::OpMultiplyAdd
+>::DefaultGemmKernel;
 
+using Mma = Kernel::Mma;
+using IteratorA = Kernel::Mma::IteratorA;
+using IteratorB = Kernel::Mma::IteratorB;
 
-using ThreadMapA = typename MmaCore::IteratorThreadMapA;
-using ThreadMapB = typename MmaCore::IteratorThreadMapB;
-using AccessTypeA = cutlass::Array<ElementA, ThreadMapA::kElementsPerAccess>;
-using AccessTypeB = cutlass::Array<ElementB, ThreadMapB::kElementsPerAccess>;
-
-constexpr cutlass::arch::CacheOperation::Kind const CacheOpA =
-    cutlass::arch::CacheOperation::Global;
-
-constexpr cutlass::arch::CacheOperation::Kind const CacheOpB =
-    cutlass::arch::CacheOperation::Always;
-
-// Define iterators over tiles from the A operand
-static const bool use_idp4a = false;
-static const bool transposeA =  cutlass::platform::is_same< LayoutA, cutlass::layout::ColumnMajor >::value;
-static const bool transposeB =  cutlass::platform::is_same< LayoutB, cutlass::layout::RowMajor >::value;
-
-using IteratorA = typename cutlass::platform::conditional< use_idp4a,
-    cutlass::transform::threadblock::PredicatedTileIterator2dThreadTile<
-        cutlass::MatrixShape<ThreadblockShape::kM, ThreadblockShape::kK>,
-        ElementA, LayoutA, 1, typename MmaCore::IteratorThreadMapA, transposeA> ,
-
-    cutlass::transform::threadblock::PredicatedTileIterator<
-        cutlass::MatrixShape<ThreadblockShape::kM, ThreadblockShape::kK>,
-        ElementA, LayoutA, 1, typename MmaCore::IteratorThreadMapA>
-    >::type;
-
-// Define iterators over tiles from the B operand
-using IteratorB = typename cutlass::platform::conditional< use_idp4a,
-    cutlass::transform::threadblock::PredicatedTileIterator2dThreadTile<
-        cutlass::MatrixShape<ThreadblockShape::kK, ThreadblockShape::kN>,
-        ElementB, LayoutB, 0, typename MmaCore::IteratorThreadMapB, transposeB> ,
-
-    cutlass::transform::threadblock::PredicatedTileIterator<
-        cutlass::MatrixShape<ThreadblockShape::kK, ThreadblockShape::kN>,
-        ElementB, LayoutB, 0, typename MmaCore::IteratorThreadMapB>
-    >::type;
-
-
-// Define the threadblock-scoped pipelined matrix multiply
-// using Mma = cutlass::gemm::threadblock::MmaMultistage<
-//     typename MmaCore::Shape,
-//     IteratorA, typename MmaCore::SmemIteratorA, CacheOpA,
-//     IteratorB, typename MmaCore::SmemIteratorB, CacheOpB,
-//     ElementC, LayoutC,
-//     typename MmaCore::MmaPolicy,
-//     Stages>;
-
-
-using MmaPipelineSingleStage =  cutlass::gemm::threadblock::MmaSingleStage<
-    typename MmaCore::Shape,
-    IteratorA, typename MmaCore::SmemIteratorA,
-    IteratorB, typename MmaCore::SmemIteratorB,
-    ElementC, LayoutC,
-    typename MmaCore::MmaPolicy>;
-
-// Define MmaPipeline Two Stages
-using MmaPipelineTwoStages =  cutlass::gemm::threadblock::MmaPipelined<
-    typename MmaCore::Shape, IteratorA, typename MmaCore::SmemIteratorA,
-    IteratorB, typename MmaCore::SmemIteratorB, ElementC, LayoutC,
-    typename MmaCore::MmaPolicy>;
-
-// Define the threadblock-scoped pipelined matrix multiply (Select between Single vs. Two stages)
-using Mma = typename cutlass::platform::conditional<(Stages==1), MmaPipelineSingleStage, MmaPipelineTwoStages>::type;
 
 struct SmemBuffers {
     typename Mma::SharedStorage shared_storage;
@@ -178,7 +122,7 @@ __global__ void kernel(half * I, half * W, half * A, half * O) {
         int gemm_k_iterations = (problem_size.k() + Mma::Shape::kK - 1) / Mma::Shape::kK;
 
         // Compute threadblock-scoped matrix multiply-add
-        // mma(gemm_k_iterations, accum, iterator_A, iterator_B, accum);
+        mma(gemm_k_iterations, accum, iterator_A, iterator_B, accum);
 
         // Output results
         typename Mma::Operator::IteratorC iterator_C(
@@ -200,8 +144,8 @@ __global__ void kernel(half * I, half * W, half * A, half * O) {
 
 int main() {
     dim3 grid(1, 1);
-    dim3 block(32, MmaCore::WarpCount::kCount);
-    printf("# Warps: %d\n", MmaCore::WarpCount::kCount);
+    dim3 block(32, 8);
+    printf("# Warps: %d\n", 8);
 
     // const int smem_size = sizeof(SmemBuffers);
     // printf("smem_size: %d\n", smem_size);
@@ -222,11 +166,10 @@ int main() {
     void * dev_A = nullptr;
     void * dev_O = nullptr;
 
-    cudaErrCheck(cudaMalloc(&dev_I, sizeof(half) * M * K));
-    cudaErrCheck(cudaMalloc(&dev_W, sizeof(half) * N * K));
-    cudaErrCheck(cudaMalloc(&dev_A, sizeof(half) * M * N));
-
-    cudaErrCheck(cudaMalloc(&dev_O, sizeof(half) * M * N));
+    cudaErrCheck(cudaMalloc(&dev_I, sizeof(half) * M * K + 32));
+    cudaErrCheck(cudaMalloc(&dev_W, sizeof(half) * N * K + 32));
+    cudaErrCheck(cudaMalloc(&dev_A, sizeof(half) * M * N + 32));
+    cudaErrCheck(cudaMalloc(&dev_O, sizeof(half) * M * N + 32));
 
 
     printf("Running...\n");
