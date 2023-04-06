@@ -17,7 +17,7 @@ default: run
 
 HDRS=$(wildcard *.cuh)
 # APP=test_mgn_node_pipe
-APP=bgemm_tput
+APP=l2_gemm
 
 $(APP): $(APP).cu $(HDRS)
 	/usr/local/cuda/bin/nvcc \

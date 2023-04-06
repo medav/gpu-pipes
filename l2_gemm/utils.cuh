@@ -1,3 +1,6 @@
+#pragma once
+#include <cuda.h>
+
 #define cudaErrCheck(stat)                         \
     {                                              \
         cudaErrCheck_((stat), __FILE__, __LINE__); \
