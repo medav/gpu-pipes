@@ -3,15 +3,15 @@
 
 
 template<typename Block_, size_t NumWarps_>
-class Mlp0s1 {
+class Mlp1s0 {
 public:
     using Block = Block_;
 
-    static const size_t num_warps = NumWarps_;
-    static const size_t nblk_per_warp = Block::kK / num_warps;
-    static const size_t read_bytes = Block::kM * Block::kK * sizeof(half);
-    static const size_t write_bytes = Block::kM * Block::kN * sizeof(half);
-    static const size_t buf_len = 3;
+    static constexpr size_t num_warps = NumWarps_;
+    static constexpr size_t nblk_per_warp = Block::kK / num_warps;
+    static constexpr size_t read_bytes = Block::kM * Block::kK * sizeof(half);
+    static constexpr size_t write_bytes = Block::kM * Block::kN * sizeof(half);
+    static constexpr size_t buf_len = 3;
 
     using GemmOp = ThreadBlockGemmTensorOp<
         num_warps, cutlass::gemm::GemmShape<Block::kM, Block::kN, Block::kK>>;
@@ -39,7 +39,7 @@ private:
     Buffer * buf;
 
 public:
-    __device__ Mlp0s1(half * smem, size_t prob_m, size_t _lane_id, size_t _warp_id) :
+    __device__ Mlp1s0(half * smem, size_t prob_m, size_t _lane_id, size_t _warp_id) :
         lane_id(_lane_id),
         warp_id(_warp_id),
         this_block(cooperative_groups::this_thread_block()),
@@ -48,6 +48,7 @@ public:
         buf((Buffer *)smem) { }
 
     __device__ void load_weights_async(half * weight) {
+        #pragma unroll
         for (size_t i = 0; i < Block::kN; i++) {
             cooperative_groups::memcpy_async(
                 this_block,
@@ -57,31 +58,21 @@ public:
         }
     }
 
-    __device__ void read_input(ssize_t seq_n_, half * input) {
+    template<typename QT>
+    __device__ void read_input(ssize_t seq_n_, QT& in_q) {
         if (seq_n_ >= num_iters) return;
         const size_t mbase = seq_n_ * Block::kM;
-
-        cooperative_groups::memcpy_async(
-            this_block,
-            (void *)&buf->in[seq_n_ % buf_len][0][0],
-            (void *)&input[mbase * Block::kK],
-            Block::kM * Block::kK * sizeof(half)
-        );
-    };
-
-    template<typename QT>
-    __device__ void read_accum(ssize_t seq_n_, QT& in_q) {
-        if (seq_n_ >= num_iters) return;
-        const size_t wbytes = write_bytes;
 
         auto& slot = in_q.read_wait(seq_n_);
         cooperative_groups::memcpy_async(
             this_block,
+            (void *)&buf->in[seq_n_ % buf_len][0][0],
             (void *)&slot.data.buf[0][0],
-            (void *)&buf->out[seq_n_ % buf_len][0][0],
-            wbytes
+            Block::kM * Block::kK * sizeof(half)
         );
     };
+
+    __device__ void read_accum(ssize_t seq_n_) { };
 
     template<typename QT>
     __device__ void write_output(ssize_t seq_n_, QT& out_q) {
@@ -121,23 +112,23 @@ public:
     };
 
 
-    template<typename QIN, typename QOUT>
-    __device__ void run(half * weight, half * input, QIN& accum_in_q, QOUT& out_q) {
+    template<typename IQ, typename OQ>
+    __device__ void run(half * weight, IQ& in_q, OQ& out_q) {
         out_q.reset();
 
         load_weights_async(weight);
         this_block.sync();
 
-        read_input(0, input);
-        read_accum(0, accum_in_q);
+        read_input(0, in_q);
+        read_accum(0);
 
         for (ssize_t seq_n = 1; seq_n < num_iters + 3; seq_n++) {
             this_block.sync();              // Barrier
-            read_commit(seq_n - 1, accum_in_q);         // Non-blocking
+            read_commit(seq_n - 1, in_q);         // Non-blocking
             write_commit(seq_n - 3, out_q); // Non-blocking
 
-            read_input(seq_n, input);       // Asynchronous / Non-Blocking
-            read_accum(seq_n, accum_in_q);              // Asynchronous / Non-Blocking
+            read_input(seq_n, in_q);       // Asynchronous / Non-Blocking
+            read_accum(seq_n);              // Asynchronous / Non-Blocking
             write_output(seq_n - 2, out_q); // Asynchronous / Non-Blocking
 
             compute(seq_n - 1);             // Blocks

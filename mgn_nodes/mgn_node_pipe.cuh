@@ -33,7 +33,9 @@ struct SmemBuffers {
 
 
 struct MgnNodeMlp {
-    static const size_t m = 1024 * 1024;
+    static const size_t mo = 20;
+    static const size_t mi = 16 * 1024;
+    static const size_t m = mo * mi;
     static const size_t d = 128;
 
     half in[3][m][d];
@@ -45,18 +47,18 @@ struct MgnNodeMlp {
     static const size_t mblk = 64;
     static const size_t num_warps = 8;
 
-    static const size_t s1_qlen = 4;
-    static const size_t s12_qlen = 4;
-    static const size_t s23_qlen = 4;
+    static const size_t s1_qlen  = 8;
+    static const size_t s12_qlen = 8;
+    static const size_t s23_qlen = 8;
 
     using QEntry = QueueEntry2D<half, mblk, d>;
     using Stage1Queue = MpmcRingQueue<QEntry, s1_qlen, 1, 1>;
     using Stage12Queue = MpmcRingQueue<QEntry, s12_qlen, 1, 1>;
     using Stage23Queue = MpmcRingQueue<QEntry, s23_qlen, 1, 1>;
 
-    Stage1Queue q1[2];
-    Stage12Queue q12;
-    Stage23Queue q23;
+    Stage1Queue  q1[mo][2];
+    Stage12Queue q12[mo];
+    Stage23Queue q23[mo];
 
 };
 

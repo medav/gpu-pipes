@@ -120,9 +120,11 @@ public:
             this_block.sync();              // Barrier
             read_commit(seq_n - 1);         // Non-blocking
             write_commit(seq_n - 3, out_q); // Non-blocking
-            read_input(seq_n, input);       // Asynchornous / Non-Blocking
-            read_accum(seq_n);              // Asynchornous / Non-Blocking
-            write_output(seq_n - 2, out_q); // Asynchornous / Non-Blocking
+
+            read_input(seq_n, input);       // Asynchronous / Non-Blocking
+            read_accum(seq_n);              // Asynchronous / Non-Blocking
+            write_output(seq_n - 2, out_q); // Asynchronous / Non-Blocking
+
             compute(seq_n - 1);             // Blocks
         }
     }
