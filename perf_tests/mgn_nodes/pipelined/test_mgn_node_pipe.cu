@@ -1,6 +1,6 @@
 #include "mgn_node_pipe.cuh"
 #include "pipe.cuh"
-#include "pipegemm.cuh"
+#include "pipegemm2.cuh"
 
 #include "utils.cuh"
 
@@ -160,7 +160,19 @@ int main() {
     MgnNodeMlp * prob;
     cudaErrCheck(cudaMalloc(&prob, sizeof(MgnNodeMlp) + 128));
     // Align prob
-    prob = (MgnNodeMlp*)(((size_t)prob + 0x3F) & ~0x3F);
+    // prob = (MgnNodeMlp*)(((size_t)prob + 0x3F) & ~0x3F);
+
+    // Print address of prob
+    printf("prob: %p\n", prob);
+
+
+    size_t tot_pipe_bytes =
+        MgnNodeMlp::mo * (2 * sizeof(MgnNodeMlp::Stage1Queue) +
+        sizeof(MgnNodeMlp::Stage12Queue) +
+        sizeof(MgnNodeMlp::Stage23Queue));
+
+    printf("Total pipe bytes: %lu\n", tot_pipe_bytes);
+    printf("Total pipe bytes: %lu KB\n", tot_pipe_bytes / 1024);
 
     printf("Init...\n");
     init_prob<<<1, 128>>>(prob);
@@ -170,13 +182,17 @@ int main() {
     // dim3 grid(5, 1);
     dim3 block(32, num_warps);
 
+    size_t NI = 10000;
+
     printf("SMEM: %lu\n", max_smem);
     printf("# Warps: %lu\n", num_warps);
 
     printf("Running...\n");
     float time_ms = cuda_time_kernel_ms(
         [&]() {
-            kernel<<<grid, block, max_smem>>>(prob);
+            for (size_t i = 0; i < NI; i++) {
+                kernel<<<grid, block, max_smem>>>(prob);
+            }
         }
     );
 
@@ -186,7 +202,7 @@ int main() {
         2.0f * MgnNodeMlp::m * (3 * MgnNodeMlp::d) * MgnNodeMlp::d +
         2.0f * MgnNodeMlp::m * MgnNodeMlp::d * MgnNodeMlp::d +
         2.0f * MgnNodeMlp::m * MgnNodeMlp::d * MgnNodeMlp::d;
-    float gflops_v1 = flops_v1 / (time_ms * 1e6);
+    float gflops_v1 = NI * flops_v1 / (time_ms * 1e6);
     printf("+ GFLOPS: %f\n", gflops_v1);
 
     return 0;
