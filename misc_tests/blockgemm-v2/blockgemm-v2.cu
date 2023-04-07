@@ -25,19 +25,19 @@
 #include "utils.cuh"
 
 #define NI 1000000
-#define M 256
+#define M 128
 #define N 128
 #define K 128
 
 using Kernel = typename cutlass::gemm::kernel::DefaultGemmUniversal<
-    cutlass::half_t, cutlass::layout::ColumnMajor, cutlass::ComplexTransform::kNone, 8,    // transposed B operand
+    cutlass::half_t, cutlass::layout::RowMajor, cutlass::ComplexTransform::kNone, 8,    // transposed B operand
     cutlass::half_t, cutlass::layout::RowMajor, cutlass::ComplexTransform::kNone, 8,    // transposed A operand
     cutlass::half_t, cutlass::layout::RowMajor,
     cutlass::half_t,
     cutlass::arch::OpClassTensorOp,
     cutlass::arch::Sm80,
-    cutlass::gemm::GemmShape<256, 128, 32>,
-    cutlass::gemm::GemmShape<64, 64, 32>,
+    cutlass::gemm::GemmShape<128, 128, 32>,
+    cutlass::gemm::GemmShape<32, 64, 32>,
     cutlass::gemm::GemmShape<16, 8, 16>,
     cutlass::epilogue::thread::LinearCombination<
       cutlass::half_t,
@@ -59,18 +59,14 @@ struct SmemBuffers {
     typename Mma::SharedStorage shared_storage;
 };
 
+#define NN 1024
+
 __global__ void kernel(half * I, half * W, half * A, half * O) {
     extern __shared__ char smem[];
     SmemBuffers * buf = reinterpret_cast<SmemBuffers *>(smem);
 
-    // half I[M * K];
-    // half W[N * K];
-    // half O[M * N];
-
-    // SmemBuffers * smem = reinterpret_cast<SmemBuffers *>(x);
     cutlass::gemm::GemmCoord problem_size(M, N, K);
 
-    // Compute threadblock location
     cutlass::gemm::GemmCoord tb_tile_offset =
         {(int)blockIdx.x, (int)blockIdx.y, 0};
 
@@ -84,14 +80,12 @@ __global__ void kernel(half * I, half * W, half * A, half * O) {
         tb_tile_offset.n() * Mma::Shape::kN
     };
 
-    // Compute position within threadblock
     int tb_thread_id = threadIdx.y * blockDim.x + threadIdx.x;
 
     for (size_t i = 0; i < NI; i++) {
-        // Construct iterators to A and B operands
         typename Mma::IteratorA iterator_A(
             {{problem_size.k()}},
-            (cutlass::half_t *)I,
+            (cutlass::half_t *)&I[(i % NN) * M * K],
             {problem_size.m(), problem_size.k()},
             tb_thread_id,
             tb_offset_A);
@@ -106,35 +100,26 @@ __global__ void kernel(half * I, half * W, half * A, half * O) {
         int warp_id = __shfl_sync(0xffffffff, threadIdx.y, 0);
         int lane_id = threadIdx.x;
 
-
-        // Construct thread-scoped matrix multiply
         Mma mma(buf->shared_storage, tb_thread_id, warp_id, threadIdx.x);
 
         typename Mma::FragmentC accum;
-
-        // typename Mma::Operator::IteratorC iterator_ACC(
-        //     {(typename Mma::ElementC *)A, (int)N}, lane_id);
-
-        // iterator_ACC.load(accum);
-
         accum.clear();
 
-        int gemm_k_iterations = (problem_size.k() + Mma::Shape::kK - 1) / Mma::Shape::kK;
 
-        // Compute threadblock-scoped matrix multiply-add
-        mma(gemm_k_iterations, accum, iterator_A, iterator_B, accum);
+        mma(CLD(problem_size.k(), Mma::Shape::kK),
+            accum,
+            iterator_A,
+            iterator_B,
+            accum);
 
-        // Output results
         typename Mma::Operator::IteratorC iterator_C(
-            {(typename Mma::ElementC *)O, (int)M}, lane_id);
+            {(typename Mma::ElementC *)&O[(i % NN) * M * N], (int)N}, lane_id);
 
         int warp_idx_mn = warp_id % (Mma::WarpCount::kM * Mma::WarpCount::kN);
         iterator_C.add_tile_offset({
             (tb_tile_offset.m() * Mma::WarpCount::kM) + (warp_idx_mn % Mma::WarpCount::kM),
             (tb_tile_offset.n() * Mma::WarpCount::kN) + (warp_idx_mn / Mma::WarpCount::kM)
         });
-
-
 
         iterator_C.store(accum);
     }
@@ -144,8 +129,8 @@ __global__ void kernel(half * I, half * W, half * A, half * O) {
 
 int main() {
     dim3 grid(1, 1);
-    dim3 block(32, 8);
-    printf("# Warps: %d\n", 8);
+    dim3 block(32, Mma::WarpCount::kCount);
+    printf("# Warps: %d\n", Mma::WarpCount::kCount);
 
     // const int smem_size = sizeof(SmemBuffers);
     // printf("smem_size: %d\n", smem_size);
@@ -161,21 +146,21 @@ int main() {
     cudaErrCheck(cudaFuncSetAttribute(
         kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem));
 
-    void * dev_I = nullptr;
-    void * dev_W = nullptr;
-    void * dev_A = nullptr;
-    void * dev_O = nullptr;
+    half * dev_I = nullptr;
+    half * dev_W = nullptr;
+    half * dev_A = nullptr;
+    half * dev_O = nullptr;
 
-    cudaErrCheck(cudaMalloc(&dev_I, sizeof(half) * M * K + 32));
+    cudaErrCheck(cudaMalloc(&dev_I, sizeof(half) * M * K * NN + 32));
     cudaErrCheck(cudaMalloc(&dev_W, sizeof(half) * N * K + 32));
     cudaErrCheck(cudaMalloc(&dev_A, sizeof(half) * M * N + 32));
-    cudaErrCheck(cudaMalloc(&dev_O, sizeof(half) * M * N + 32));
+    cudaErrCheck(cudaMalloc(&dev_O, sizeof(half) * M * N * NN + 32));
 
 
     printf("Running...\n");
     float time_ms = cuda_time_kernel_ms(
         [&]() {
-            kernel<<<grid, block, smem>>>((half *)dev_I, (half *)dev_W, (half *)dev_A, (half *)dev_O);
+            kernel<<<grid, block, smem>>>(dev_I, dev_W, dev_A, dev_O);
         }
     );
 
