@@ -173,21 +173,26 @@ __device__ void gemmpipe(
 
 #define M 256
 #define N 128
-#define K (8 * 1024)
+#define K (256)
+
+struct Problem {
+    half input[108][K][N];
+    half weight[M][K];
+    half output[108][M][N];
+};
 
 using Shape = cutlass::gemm::GemmShape<M, N, K>;
 
-__global__ void kernel(half * weight, half * input, half * output, size_t NI) {
+__global__ void kernel(Problem * prob, size_t NI) {
     using Input = MemoryReader;
     using Accum = NullReader;
     using Output = MemoryWriter;
 
-    Input ir(input);
+    Input ir(&prob->input[blockIdx.x][0][0]);
     Accum ar;
-    Output ow(output);
+    Output ow(&prob->output[blockIdx.x][0][0]);
 
-    gemmpipe<Shape, Input, Accum, Output>(weight, ir, ar, ow, NI);
-
+    gemmpipe<Shape, Input, Accum, Output>(&prob->weight[0][0], ir, ar, ow, NI);
 }
 
 
@@ -201,15 +206,11 @@ int main(int argc, char ** argv) {
     cudaErrCheck(cudaFuncSetAttribute(
         kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_bytes));
 
-    half * weight;
-    half * input;
-    half * output;
+    Problem * prob;
 
     size_t NI = std::atoi(argv[1]);
 
-    cudaMalloc(&weight, M * K * sizeof(half));
-    cudaMalloc(&input, K * N * sizeof(half));
-    cudaMalloc(&output, M * N * sizeof(half));
+    cudaErrCheck(cudaMallocManaged(&prob, sizeof(Problem)));
 
     dim3 grid(108);
     dim3 block(32, num_warps);
@@ -218,7 +219,7 @@ int main(int argc, char ** argv) {
 
     float time_ms = cuda_time_kernel_ms(
         [&]() {
-            kernel<<<grid, block, smem_bytes>>>(weight, input, output, NI);
+            kernel<<<grid, block, smem_bytes>>>(prob, NI);
         }
     );
 
