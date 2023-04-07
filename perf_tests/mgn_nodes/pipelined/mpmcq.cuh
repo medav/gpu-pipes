@@ -8,6 +8,7 @@ __device__ bool is_master() {
 }
 
 #define DEBUG 0
+// #define NOSYNC
 
 template<typename T, size_t N, size_t NP, size_t NC>
 struct QueueSlot {
@@ -15,8 +16,6 @@ struct QueueSlot {
     int seq_n;
     int read_done;
     int write_done;
-
-    size_t pad[1024];
     Item data;
 
 
@@ -33,12 +32,15 @@ struct QueueSlot {
     __device__ bool drained() const { return read_done == NP && write_done == NC; }
 
     __device__ void commit_write() {
+#ifndef NOSYNC
         if (is_master()) {
             atomicAdd((int *)&write_done, 1);
         }
+#endif
     }
 
     __device__ void commit_read() {
+#ifndef NOSYNC
         if (is_master()) {
             int old = atomicAdd((int *)&read_done, (int)1);
 
@@ -48,6 +50,7 @@ struct QueueSlot {
                 atomicAdd(&seq_n, N);
             }
         }
+#endif
     }
 
 };
@@ -75,10 +78,12 @@ public:
 
     __device__ Slot& allocate(int seq_n) {
         Slot& slot = slots[seq_n % N];
+#ifndef NOSYNC
         if (is_master()) {
             while (atomicAdd(&slot.seq_n, (int)0) != seq_n) {  }
         }
         __syncthreads();
+#endif
         return slot;
     }
 
@@ -94,11 +99,12 @@ public:
 
     __device__ typename Slot::Item& read_wait(int seq_n) {
         Slot& slot = allocate(seq_n);
+#ifndef NOSYNC
         if (is_master()) {
             while (atomicAdd(&slot.write_done, (int)0) != NP) {  }
         }
-
         __syncthreads();
+#endif
         return slot.data;
     }
 

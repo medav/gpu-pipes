@@ -67,6 +67,8 @@ __device__ void gemmpipe(
     typename Mma::SharedStorage * shared_storage =
         reinterpret_cast<typename Mma::SharedStorage *>(smem);
 
+    if (is_master()) printf("%p\n", shared_storage);
+
     ir.reset();
     ar.reset();
     ow.reset();
@@ -78,6 +80,8 @@ __device__ void gemmpipe(
     const int warp_id = __shfl_sync(0xffffffff, threadIdx.y, 0);
     const int lane_id = threadIdx.x;
     const int warp_idx_mn = warp_id % (Mma::WarpCount::kM * Mma::WarpCount::kN);
+
+    typename Mma::FragmentC accum;
 
     for (size_t i = 0; i < num_iters; i++) {
         half * i_ptr = ir.read_acquire();
@@ -97,7 +101,6 @@ __device__ void gemmpipe(
             tb_offset_B);
 
         Mma gemm_op(*shared_storage, tb_thread_id, warp_id, threadIdx.x);
-        typename Mma::FragmentC accum;
 
         half * acc_ptr = ar.read_acquire();
         if (acc_ptr == nullptr) {

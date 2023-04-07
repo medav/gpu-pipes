@@ -34,8 +34,8 @@ struct SmemBuffers {
 
 
 struct MgnNodeMlp {
-    static const size_t mo = 20;
-    static const size_t mi = 16 * 1024;
+    static const size_t mo = 1;
+    static const size_t mi = 32 * 1024;
     static const size_t m = mo * mi;
     static const size_t d = 128;
 
@@ -46,10 +46,9 @@ struct MgnNodeMlp {
     half out[m][d];
 
     static const size_t mblk = 256;
-
-    static const size_t s1_qlen  = 8;
-    static const size_t s12_qlen = 8;
-    static const size_t s23_qlen = 8;
+    static const size_t s1_qlen  = 2;
+    static const size_t s12_qlen = 2;
+    static const size_t s23_qlen = 2;
 
     using QEntry = QueueEntry2D<half, mblk, d>;
     using Stage1Queue = MpmcRingQueue<QEntry, s1_qlen, 1, 1>;
@@ -69,7 +68,6 @@ __global__ void init_prob(MgnNodeMlp *prob) {
         prob->in[0][i][d] = (half)1.0f;
         prob->in[1][i][d] = (half)1.0f;
         prob->in[2][i][d] = (half)1.0f;
-
         prob->out[i][d] = (half)0.0f;
     }
 
