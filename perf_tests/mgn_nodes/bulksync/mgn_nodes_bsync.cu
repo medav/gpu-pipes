@@ -23,10 +23,10 @@
 
 #include "utils.cuh"
 
-using ThreadblockShape = cutlass::gemm::GemmShape<256, 128, 32>;
+using ThreadblockShape = cutlass::gemm::GemmShape<128, 128, 32>;
 
 using Kernel = typename cutlass::gemm::kernel::DefaultGemmUniversal<
-    cutlass::half_t, cutlass::layout::ColumnMajor, cutlass::ComplexTransform::kNone, 8,    // transposed B operand
+    cutlass::half_t, cutlass::layout::RowMajor, cutlass::ComplexTransform::kNone, 8,    // transposed B operand
     cutlass::half_t, cutlass::layout::RowMajor, cutlass::ComplexTransform::kNone, 8,    // transposed A operand
     cutlass::half_t, cutlass::layout::RowMajor,
     cutlass::half_t,
@@ -78,7 +78,7 @@ __global__ void kernel(half * I, half * W, half * O) {
     int tb_thread_id = threadIdx.y * blockDim.x + threadIdx.x;
 
     typename Mma::IteratorA iterator_A(
-        {{problem_size.m()}},
+        {{problem_size.k()}},
         (cutlass::half_t *)I,
         {problem_size.m(), problem_size.k()},
         tb_thread_id,
@@ -121,14 +121,15 @@ __global__ void kernel(half * I, half * W, half * O) {
 template<size_t M, size_t N, size_t K>
 void run_gemm(half * I, half * W, half * O) {
     dim3 grid(M / ThreadblockShape::kM, N / ThreadblockShape::kN, 1);
+    // printf("grid: %d %d %d\n", grid.x, grid.y, grid.z);
     dim3 block(32, Mma::WarpCount::kCount, 1);
     size_t smem_size = sizeof(SmemBuffers);
 
     kernel<M, N, K><<<grid, block, smem_size>>>(I, W, O);
 }
 
-#define BS 128
-#define NN 1024
+#define BS 20
+#define NN 256 * 1024
 
 #define BB (BS * NN)
 
@@ -165,16 +166,16 @@ int main() {
         sizeof(SmemBuffers)));
 
 
-    cudaMalloc(&I, BS * NN * 384 * sizeof(half));
-    cudaMalloc(&T1, BS * NN * 128 * sizeof(half));
-    cudaMalloc(&T2, BS * NN * 128 * sizeof(half));
-    cudaMalloc(&O, BS * NN * 128 * sizeof(half));
+    cudaMalloc(&I,  BB * 384 * sizeof(half));
+    cudaMalloc(&T1, BB * 128 * sizeof(half));
+    cudaMalloc(&T2, BB * 128 * sizeof(half));
+    cudaMalloc(&O,  BB * 128 * sizeof(half));
 
     cudaMalloc(&W1, 384 * 128 * sizeof(half));
     cudaMalloc(&W2, 128 * 128 * sizeof(half));
     cudaMalloc(&W3, 128 * 128 * sizeof(half));
 
-    size_t NI = 100000;
+    size_t NI = 1000;
 
     printf("Running...\n");
     float time_ms = cuda_time_kernel_ms(
