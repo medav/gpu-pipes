@@ -21,20 +21,8 @@ struct QueueEntry2D {
     __device__ QueueEntry2D() : buf{(Element)0} {}
 };
 
-template<typename ST, typename DT, size_t L, size_t M, size_t N, size_t K>
-struct SmemBuffers {
-    DT in[L][M][K];
-    DT weight[N][K];
-    DT out[L][M][N];
-    ST shared_state;
-
-    static const size_t num_elems = L * M * K + N * K + L * M * N;
-    static const size_t num_bytes = num_elems * sizeof(DT);
-};
-
-
 struct MgnNodeMlp {
-    static const size_t mo = 1;
+    static const size_t mo = 20;
     static const size_t mi = 32 * 1024;
     static const size_t m = mo * mi;
     static const size_t d = 128;
@@ -45,21 +33,24 @@ struct MgnNodeMlp {
     half w3[d][d];
     half out[m][d];
 
-    static const size_t mblk = 256;
-    static const size_t s1_qlen  = 2;
-    static const size_t s12_qlen = 2;
-    static const size_t s23_qlen = 2;
+    static const size_t mblk = 64;
+    static const size_t s1_qlen  = 3;
+    static const size_t s12_qlen = 3;
+    static const size_t s23_qlen = 3;
 
     using QEntry = QueueEntry2D<half, mblk, d>;
     using Stage1Queue = MpmcRingQueue<QEntry, s1_qlen, 1, 1>;
     using Stage12Queue = MpmcRingQueue<QEntry, s12_qlen, 1, 1>;
     using Stage23Queue = MpmcRingQueue<QEntry, s23_qlen, 1, 1>;
 
-    Stage1Queue  q1_01[mo];
-    Stage1Queue  q1_12[mo];
-    Stage12Queue q12[mo];
-    Stage23Queue q23[mo];
+    struct Queues {
+        Stage1Queue q1_01[mo];
+        Stage1Queue q1_12[mo];
+        Stage12Queue q12[mo];
+        Stage23Queue q23[mo];
+    };
 
+    Queues qs;
 };
 
 __global__ void init_prob(MgnNodeMlp *prob) {
