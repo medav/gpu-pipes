@@ -1,4 +1,7 @@
 #pragma once
+#include <cooperative_groups.h>
+#include <cooperative_groups/memcpy_async.h>
+
 #include "cutlass/cutlass.h"
 #include "cutlass/gemm/gemm.h"
 #include "cutlass/gemm/warp/mma.h"
@@ -31,7 +34,7 @@ using Kernel = typename cutlass::gemm::kernel::DefaultGemmUniversal<
     cutlass::half_t,
     cutlass::arch::OpClassTensorOp,
     cutlass::arch::Sm80,
-    cutlass::gemm::GemmShape<MgnNodeMlp::mblk, 128, 32>, // threadblock tile
+    cutlass::gemm::GemmShape<64, 128, 32>, // threadblock tile
     cutlass::gemm::GemmShape<64, 64, 32>,   // warp tile
     cutlass::gemm::GemmShape<16, 8, 16>,    // instruction tile
     cutlass::epilogue::thread::LinearCombination<
@@ -49,11 +52,14 @@ using Mma = Kernel::Mma;
 using IteratorA = Kernel::Mma::IteratorA;
 using IteratorB = Kernel::Mma::IteratorB;
 
-constexpr size_t num_warps = Mma::WarpCount::kCount;
+constexpr size_t num_warps = 8; //Mma::WarpCount::kCount;
 
 template<size_t M, size_t N, size_t K>
 struct SmemBuffers {
-    typename Mma::SharedStorage storage;
+    half ibuf[2][M][K];
+    half w[K][N];
+    half accbuf[2][M][N];
+    half obuf[2][M][N];
 };
 
 template<
@@ -69,9 +75,28 @@ __device__ void gemmpipe(
     OutputWriter& ow,
     size_t num_iters
 ) {
+    using Buffers =
+        SmemBuffers<ProblemShape::kM, ProblemShape::kN, ProblemShape::kK>;
+
+    constexpr size_t M = ProblemShape::kM;
+    constexpr size_t N = ProblemShape::kN;
+    constexpr size_t K = ProblemShape::kK;
+
+    auto this_block = cooperative_groups::this_thread_block();
+    cuda::barrier<cuda::thread_scope_block> bar;
+    init(&bar, 1);
+
     extern __shared__ char smem[];
-    typename Mma::SharedStorage * shared_storage =
-        reinterpret_cast<typename Mma::SharedStorage *>(smem);
+    Buffers * bufs = reinterpret_cast<Buffers *>(smem);
+
+    cooperative_groups::memcpy_async(
+        this_block,
+        (void *)&bufs->w[0][0],
+        (void *)weight,
+        K * N * sizeof(half)
+    );
+
+    this_block.sync();
 
     ir.reset();
     ar.reset();
@@ -89,63 +114,56 @@ __device__ void gemmpipe(
 
     for (size_t i = 0; i < num_iters; i++) {
         half * i_ptr = ir.read_acquire();
-
-        typename Mma::IteratorA iterator_A(
-            {{ProblemShape::kK}},
-            (cutlass::half_t *)i_ptr,
-            {ProblemShape::kM, ProblemShape::kK},
-            tb_thread_id,
-            tb_offset_A);
-
-        typename Mma::IteratorB iterator_B(
-            {{ProblemShape::kN}},
-            (cutlass::half_t *)weight,
-            {ProblemShape::kK, ProblemShape::kN},
-            tb_thread_id,
-            tb_offset_B);
-
-        Mma gemm_op(*shared_storage, tb_thread_id, warp_id, threadIdx.x);
-
         half * acc_ptr = ar.read_acquire();
-        if (acc_ptr == nullptr) {
-            accum.clear();
-        }
-        else {
-            typename Mma::Operator::IteratorC iterator_Acc(
-                {(typename Mma::ElementC *)acc_ptr, (int)ProblemShape::kN}, lane_id);
-
-            iterator_Acc.add_tile_offset({
-                (warp_idx_mn % Mma::WarpCount::kM),
-                (warp_idx_mn / Mma::WarpCount::kM)
-            });
-
-            iterator_Acc.load(accum);
-        }
-
-        ar.read_release();
-
-        gemm_op(
-            CLD(ProblemShape::kK, Mma::Shape::kK),
-            accum,
-            iterator_A,
-            iterator_B,
-            accum);
-
-        ir.read_release();
-
         half * o_ptr = ow.write_acquire();
 
-        // Output results
-        typename Mma::Operator::IteratorC iterator_C(
-            {(typename Mma::ElementC *)o_ptr, (int)ProblemShape::kN}, lane_id);
+        half * i_buf = &bufs->ibuf[i % 2][0][0];
+        half * acc_buf = &bufs->accbuf[i % 2][0][0];
+        half * o_buf = &bufs->obuf[(i + 1) % 2][0][0];
 
-        iterator_C.add_tile_offset({
-            (warp_idx_mn % Mma::WarpCount::kM),
-            (warp_idx_mn / Mma::WarpCount::kM)
-        });
+        if (acc_ptr != nullptr) {
+            cooperative_groups::memcpy_async(this_block, (void *)i_buf, (void *)i_ptr, M * K * sizeof(half));
+            cooperative_groups::memcpy_async(this_block, (void *)acc_buf, (void *)acc_ptr, M * N * sizeof(half));
+            cooperative_groups::memcpy_async(this_block, (void *)o_ptr, (void *)o_buf, M * N * sizeof(half));
+            // #pragma unroll
+            // for (size_t m = 0; m < M; m++) {
+            //     cuda::memcpy_async(i_buf, i_ptr, M * K * sizeof(half), bar);
+            //     cuda::memcpy_async(acc_buf, acc_ptr, M * N * sizeof(half), bar);
+            //     cuda::memcpy_async(o_buf, o_ptr, M * N * sizeof(half), bar);
 
-        iterator_C.store(accum);
+            //     i_ptr += K;
+            //     i_buf += K;
+            //     acc_ptr += N;
+            //     acc_buf += N;
+            //     o_ptr += N;
+            //     o_buf += N;
+            // }
+        }
+        else {
+            cooperative_groups::memcpy_async(this_block, (void *)i_buf, (void *)i_ptr, M * K * sizeof(half));
+            cooperative_groups::memcpy_async(this_block, (void *)o_ptr, (void *)o_buf, M * N * sizeof(half));
+            // #pragma unroll
+            // for (size_t m = 0; m < M; m++) {
+            //     cuda::memcpy_async(i_buf, i_ptr, K * sizeof(half), bar);
+            //     cuda::memcpy_async(o_ptr, o_buf, N * sizeof(half), bar);
 
+            //     i_ptr += K;
+            //     i_buf += K;
+            //     o_ptr += N;
+            //     o_buf += N;
+            // }
+        }
+
+        /////////////////////////////////
+        // This is where GEMM would go //
+        /////////////////////////////////
+
+        // if (tb_thread_id == 0) __nanosleep(4000);
+
+        this_block.sync();
+
+        ar.read_release();
+        ir.read_release();
         ow.write_release();
     }
 }

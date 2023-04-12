@@ -1,10 +1,10 @@
 #include "mgn_node_pipe.cuh"
 #include "pipe.cuh"
-#include "pipegemm2.cuh"
+#include "pipegemm4.cuh"
 
 #include "utils.cuh"
 
-const size_t max_smem = sizeof(typename Mma::SharedStorage);
+const size_t max_smem = sizeof(SmemBuffers<MgnNodeMlp::mblk, 128, 128>);
 
 __device__ void mlp0_sm0(void * smem, MgnNodeMlp *prob, size_t row) {
     using Input = MemoryReader;
@@ -14,9 +14,9 @@ __device__ void mlp0_sm0(void * smem, MgnNodeMlp *prob, size_t row) {
     const size_t mblk = MgnNodeMlp::mblk;
     const size_t num_iters = prob->mi / MgnNodeMlp::mblk;
 
-    Input input(&prob->in[0][row * prob->mi][0], prob->mi / mblk * prob->d);
+    Input input(&prob->in[0][row * prob->mi][0], mblk * prob->d);
     Accum accum;
-    Output output(prob->q1_01[row]);
+    Output output(prob->qs.q1_01[row]);
 
     gemmpipe<
         cutlass::gemm::GemmShape<mblk, 128, 128>,
@@ -34,9 +34,9 @@ __device__ void mlp0_sm1(void * smem, MgnNodeMlp *prob, size_t row) {
     const size_t mblk = MgnNodeMlp::mblk;
     const size_t num_iters = prob->mi / MgnNodeMlp::mblk;
 
-    Input input(&prob->in[1][row * prob->mi][0], prob->mi / mblk * prob->d);
-    Accum accum(prob->q1_01[row]);
-    Output output(prob->q1_12[row]);
+    Input input(&prob->in[1][row * prob->mi][0], mblk * prob->d);
+    Accum accum(prob->qs.q1_01[row]);
+    Output output(prob->qs.q1_12[row]);
 
     gemmpipe<
         cutlass::gemm::GemmShape<mblk, 128, 128>,
@@ -54,9 +54,9 @@ __device__ void mlp0_sm2(void * smem, MgnNodeMlp *prob, size_t row) {
     const size_t mblk = MgnNodeMlp::mblk;
     const size_t num_iters = prob->mi / MgnNodeMlp::mblk;
 
-    Input input(&prob->in[2][row * prob->mi][0], prob->mi / mblk * prob->d);
-    Accum accum(prob->q1_12[row]);
-    Output output(prob->q12[row]);
+    Input input(&prob->in[2][row * prob->mi][0], mblk * prob->d);
+    Accum accum(prob->qs.q1_12[row]);
+    Output output(prob->qs.q12[row]);
 
     gemmpipe<
         cutlass::gemm::GemmShape<mblk, 128, 128>,
@@ -74,9 +74,9 @@ __device__ void mlp1_sm0(void * smem, MgnNodeMlp *prob, size_t row) {
     const size_t mblk = MgnNodeMlp::mblk;
     const size_t num_iters = prob->mi / MgnNodeMlp::mblk;
 
-    Input input(prob->q12[row]);
+    Input input(prob->qs.q12[row]);
     Accum accum;
-    Output output(prob->q23[row]);
+    Output output(prob->qs.q23[row]);
 
     gemmpipe<
         cutlass::gemm::GemmShape<mblk, 128, 128>,
@@ -94,9 +94,9 @@ __device__ void mlp2_sm0(void * smem, MgnNodeMlp *prob, size_t row) {
     const size_t mblk = MgnNodeMlp::mblk;
     const size_t num_iters = prob->mi / MgnNodeMlp::mblk;
 
-    Input input(prob->q23[row]);
+    Input input(prob->qs.q23[row]);
     Accum accum;
-    Output output(&prob->out[row * prob->mo][0], prob->mo);
+    Output output(&prob->out[row * prob->mo][0], mblk * prob->d);
 
     gemmpipe<
         cutlass::gemm::GemmShape<mblk, 128, 128>,
@@ -178,11 +178,27 @@ int main() {
     init_prob<<<1, 128>>>(prob);
     cudaErrCheck(cudaDeviceSynchronize());
 
+    cudaStreamAttrValue attribute;
+    auto& window = attribute.accessPolicyWindow;
+    window.base_ptr = &prob->qs;
+    window.num_bytes = sizeof(MgnNodeMlp::Queues);
+    window.hitRatio = 1.0;
+    window.hitProp = cudaAccessPropertyPersisting;
+    window.missProp = cudaAccessPropertyStreaming;
+
+    cudaStreamSetAttribute(
+        cudaStreamDefault,
+        cudaStreamAttributeAccessPolicyWindow,
+        &attribute
+    );
+
     dim3 grid(5, MgnNodeMlp::mo);
     // dim3 grid(5, 1);
     dim3 block(32, num_warps);
 
-    size_t NI = 10000;
+    const size_t NI = 10000;
+    const size_t tot_loop_iters = NI * MgnNodeMlp::mi / MgnNodeMlp::mblk;
+    printf("Total loop iters: %lu\n", tot_loop_iters);
 
     printf("SMEM: %lu\n", max_smem);
     printf("# Warps: %lu\n", num_warps);
@@ -196,7 +212,8 @@ int main() {
         }
     );
 
-    printf("gemm took %fms\n", time_ms);
+    printf("Total time: %f ms\n", time_ms);
+    printf("Avg. loop iter time: %f ms\n", time_ms / tot_loop_iters);
 
     float flops_v1 =
         2.0f * MgnNodeMlp::m * (3 * MgnNodeMlp::d) * MgnNodeMlp::d +
