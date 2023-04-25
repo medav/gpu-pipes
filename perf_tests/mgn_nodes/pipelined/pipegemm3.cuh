@@ -27,30 +27,30 @@
 #define CLD(N, D) ((N + D - 1) / D)
 #include "utils.cuh"
 
-using Kernel = typename cutlass::gemm::kernel::DefaultGemmUniversal<
-    cutlass::half_t, cutlass::layout::RowMajor, cutlass::ComplexTransform::kNone, 8,    // transposed B operand
-    cutlass::half_t, cutlass::layout::RowMajor, cutlass::ComplexTransform::kNone, 8,    // transposed A operand
-    cutlass::half_t, cutlass::layout::RowMajor,
-    cutlass::half_t,
-    cutlass::arch::OpClassTensorOp,
-    cutlass::arch::Sm80,
-    cutlass::gemm::GemmShape<64, 128, 32>, // threadblock tile
-    cutlass::gemm::GemmShape<64, 64, 32>,   // warp tile
-    cutlass::gemm::GemmShape<16, 8, 16>,    // instruction tile
-    cutlass::epilogue::thread::LinearCombination<
-      cutlass::half_t,
-      8,
-      cutlass::half_t,
-      cutlass::half_t
-    >,
-    cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<8>,
-    3,
-    cutlass::arch::OpMultiplyAdd
->::DefaultGemmKernel;
+// using Kernel = typename cutlass::gemm::kernel::DefaultGemmUniversal<
+//     cutlass::half_t, cutlass::layout::RowMajor, cutlass::ComplexTransform::kNone, 8,    // transposed B operand
+//     cutlass::half_t, cutlass::layout::RowMajor, cutlass::ComplexTransform::kNone, 8,    // transposed A operand
+//     cutlass::half_t, cutlass::layout::RowMajor,
+//     cutlass::half_t,
+//     cutlass::arch::OpClassTensorOp,
+//     cutlass::arch::Sm80,
+//     cutlass::gemm::GemmShape<64, 128, 32>, // threadblock tile
+//     cutlass::gemm::GemmShape<64, 64, 32>,   // warp tile
+//     cutlass::gemm::GemmShape<16, 8, 16>,    // instruction tile
+//     cutlass::epilogue::thread::LinearCombination<
+//       cutlass::half_t,
+//       8,
+//       cutlass::half_t,
+//       cutlass::half_t
+//     >,
+//     cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<8>,
+//     3,
+//     cutlass::arch::OpMultiplyAdd
+// >::DefaultGemmKernel;
 
-using Mma = Kernel::Mma;
-using IteratorA = Kernel::Mma::IteratorA;
-using IteratorB = Kernel::Mma::IteratorB;
+// using Mma = Kernel::Mma;
+// using IteratorA = Kernel::Mma::IteratorA;
+// using IteratorB = Kernel::Mma::IteratorB;
 
 constexpr size_t num_warps = 8; //Mma::WarpCount::kCount;
 
@@ -108,9 +108,9 @@ __device__ void gemmpipe(
     const int tb_thread_id = threadIdx.y * blockDim.x + threadIdx.x;
     const int warp_id = __shfl_sync(0xffffffff, threadIdx.y, 0);
     const int lane_id = threadIdx.x;
-    const int warp_idx_mn = warp_id % (Mma::WarpCount::kM * Mma::WarpCount::kN);
+    // const int warp_idx_mn = warp_id % (Mma::WarpCount::kM * Mma::WarpCount::kN);
 
-    typename Mma::FragmentC accum;
+    // typename Mma::FragmentC accum;
 
     for (size_t i = 0; i < num_iters; i++) {
         half * i_ptr = ir.read_acquire();
@@ -125,33 +125,10 @@ __device__ void gemmpipe(
             cooperative_groups::memcpy_async(this_block, (void *)i_buf, (void *)i_ptr, M * K * sizeof(half));
             cooperative_groups::memcpy_async(this_block, (void *)acc_buf, (void *)acc_ptr, M * N * sizeof(half));
             cooperative_groups::memcpy_async(this_block, (void *)o_ptr, (void *)o_buf, M * N * sizeof(half));
-            // #pragma unroll
-            // for (size_t m = 0; m < M; m++) {
-            //     cuda::memcpy_async(i_buf, i_ptr, M * K * sizeof(half), bar);
-            //     cuda::memcpy_async(acc_buf, acc_ptr, M * N * sizeof(half), bar);
-            //     cuda::memcpy_async(o_buf, o_ptr, M * N * sizeof(half), bar);
-
-            //     i_ptr += K;
-            //     i_buf += K;
-            //     acc_ptr += N;
-            //     acc_buf += N;
-            //     o_ptr += N;
-            //     o_buf += N;
-            // }
         }
         else {
             cooperative_groups::memcpy_async(this_block, (void *)i_buf, (void *)i_ptr, M * K * sizeof(half));
             cooperative_groups::memcpy_async(this_block, (void *)o_ptr, (void *)o_buf, M * N * sizeof(half));
-            // #pragma unroll
-            // for (size_t m = 0; m < M; m++) {
-            //     cuda::memcpy_async(i_buf, i_ptr, K * sizeof(half), bar);
-            //     cuda::memcpy_async(o_ptr, o_buf, N * sizeof(half), bar);
-
-            //     i_ptr += K;
-            //     i_buf += K;
-            //     o_ptr += N;
-            //     o_buf += N;
-            // }
         }
 
         /////////////////////////////////
