@@ -73,9 +73,9 @@ __device__ void gemmpipe(
     typename Mma::SharedStorage * shared_storage =
         reinterpret_cast<typename Mma::SharedStorage *>(smem);
 
-    ir.reset();
-    ar.reset();
-    ow.reset();
+    // ir.reset();
+    // ar.reset();
+    // ow.reset();
 
     cutlass::MatrixCoord tb_offset_A {0, 0};
     cutlass::MatrixCoord tb_offset_B {0, 0};
