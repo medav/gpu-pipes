@@ -29,7 +29,7 @@ struct QueueReader {
     Queue& q;
     size_t seq_n;
 
-    __device__ QueueReader(Queue& q) : q(q), seq_n(0) {}
+    __device__ QueueReader(Queue& q) : q(q), seq_n(0) { }
     __device__ half* read_acquire() { return q.read_wait(seq_n).as_ptr(); }
     __device__ void read_release() { q.read_commit(seq_n); seq_n++; }
     __device__ void reset() { seq_n = 0; }
@@ -54,7 +54,7 @@ struct QueueWriter {
     Queue& q;
     size_t seq_n;
 
-    __device__ QueueWriter(Queue& q) : q(q), seq_n(0) {}
+    __device__ QueueWriter(Queue& q) : q(q), seq_n(0) { q.reset(); }
     __device__ half* write_acquire() { return q.write_wait(seq_n).as_ptr(); }
     __device__ void write_release() { q.write_commit(seq_n++); }
     __device__ void reset() { seq_n = 0; q.reset(); }
