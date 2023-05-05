@@ -57,6 +57,26 @@ __device__ void memcpy_async_1r(void *dst, void const *src) {
     }
 }
 
+template<size_t NTHREAD, size_t NBYTES>
+__device__ void memcpy_async_1r_v2(
+    void *dst,
+    void const *src,
+    const size_t tid
+) {
+    const size_t offset = tid * 16;
+    const size_t stride = NTHREAD * 16;
+
+    char * dst_ptr = ((char *)dst) + offset;
+    char * src_ptr = ((char *)src) + offset;
+
+    #pragma unroll
+    for (size_t i = offset; i < NBYTES; i += stride) {
+        cp_async16(dst_ptr, src_ptr);
+        dst_ptr += stride;
+        src_ptr += stride;
+    }
+}
+
 template<size_t TBSIZE, size_t NBYTES, size_t BPT=4>
 __device__ void memcpy_sync_1w(void *dst, void const *src) {
     const size_t tb_tid = threadIdx.x + threadIdx.y * blockDim.x;
@@ -155,6 +175,52 @@ __device__ void memcpy_2r_1w_interleaved(
         r2dst_ptr += rstride;
         r2src_ptr += rstride;
     }
+}
+
+__global__ void cpasync_correctness(uint8_t * ibuf) {
+    __shared__ uint8_t sbuf[1024];
+    const size_t tb_tid = threadIdx.x + threadIdx.y * blockDim.x;
+    const size_t offset = tb_tid * 16;
+
+    cp_async16(sbuf + offset, ibuf + offset);
+    commit_group();
+    wait_all();
+
+    if (threadIdx.x == 0 && threadIdx.y == 0) {
+        for (size_t i = 0; i < 1024; i++) {
+            printf("%u ", sbuf[i]);
+
+            if (i % 16 == 15) {
+                printf("\n");
+            }
+        }
+
+    }
+    __syncthreads();
+
+}
+
+void test_cpasync_correctness() {
+    printf("==== Correctness ====\n");
+    uint8_t buf[1024];
+    for (size_t i = 0; i < 1024; i++) {
+        buf[i] = i % 13;
+    }
+
+    uint8_t * ibuf;
+    cudaMalloc(&ibuf, 1024 * sizeof(uint8_t));
+
+    cudaMemcpy(ibuf, buf, 1024 * sizeof(uint8_t), cudaMemcpyHostToDevice);
+
+    dim3 grid(1);
+    dim3 block(32, 2);
+
+    printf("Running...\n");
+    float time_ms = cuda_time_kernel_ms(
+        [&]() { cpasync_correctness<<<grid, block>>>(ibuf); }
+    );
+
+    cudaFree(ibuf);
 }
 
 __global__ void kernel_1r(size_t num_iters, half * ibuf) {
@@ -306,10 +372,151 @@ void test_kernel_1r_1w_interleaved() {
 }
 
 
+__global__ void kernel_1r_1w_warp_specialized(size_t num_iters, half * ibuf, half * obuf) {
+    __shared__ half sbuf_in[M][K];
+    __shared__ half sbuf_out[M][N];
+
+    const size_t tid = threadIdx.x;
+    const size_t wid = threadIdx.y;
+
+    for (size_t ii = 0; ii < num_iters; ii++) {
+        if (wid == 0) {
+            memcpy_async_1r_v2<32, M * K * sizeof(half)>(
+                (void *)&sbuf_in[0][0],
+                (void *)&ibuf[(ii % B) * M * K],
+                tid);
+
+            commit_group();
+        }
+        else {
+            memcpy_sync_1w<256, M * N * sizeof(half)>(
+                (void *)&obuf[(ii % B) * M * K],
+                (void *)&sbuf_out[0][0]);
+        }
+
+        wait_all();
+    }
+
+    wait_all();
+}
+
+void test_kernel_1r_1w_warp_specialized() {
+    printf("==== 1 Read Stream and 1 Write Stream (Warp Specialized) ====\n");
+    half * ibuf;
+    half * obuf;
+    cudaMalloc(&ibuf, B * M * K * sizeof(half));
+    cudaMalloc(&obuf, B * M * N * sizeof(half));
+
+    dim3 grid(1);
+    dim3 block(32, 2);
+    const size_t num_iters = 10000000;
+
+    printf("Running...\n");
+    float time_ms = cuda_time_kernel_ms(
+        [&]() { kernel_1r_1w_warp_specialized<<<grid, block>>>(num_iters, ibuf, obuf); }
+    );
+
+    float bytes_rx = num_iters * M * K * sizeof(half);
+    float bytes_tx = num_iters * M * N * sizeof(half);
+    float tot_bytes = bytes_rx + bytes_tx;
+
+    printf("Took %f ms\n", time_ms);
+    printf("Read Bandwidth: %f GB/s\n", bytes_rx / time_ms / 1e6);
+    printf("Read Bytes per cycle: %f\n\n", bytes_rx / (time_ms * 1e-3 * 1.4e9));
+
+    printf("Write Bandwidth: %f GB/s\n", bytes_tx / time_ms / 1e6);
+    printf("Write Bytes per cycle: %f\n\n", bytes_tx / (time_ms * 1e-3 * 1.4e9));
+
+    printf("Total Bandwidth: %f GB/s\n", tot_bytes / time_ms / 1e6);
+    printf("Total Bytes per cycle: %f\n\n", tot_bytes / (time_ms * 1e-3 * 1.4e9));
+
+    cudaFree(ibuf);
+    cudaFree(obuf);
+}
+
+
+
+__global__ void kernel_2r_1w_warp_specialized(size_t num_iters, half * ibuf0, half * ibuf1, half * obuf) {
+    __shared__ half sbuf_in0[M][K];
+    __shared__ half sbuf_in1[M][K];
+    __shared__ half sbuf_out[M][N];
+
+    const size_t tid = threadIdx.x;
+    const size_t wid = threadIdx.y;
+
+    for (size_t ii = 0; ii < num_iters; ii++) {
+        if (wid == 0) {
+            memcpy_async_1r_v2<32, M * K * sizeof(half)>(
+                (void *)&sbuf_in0[0][0],
+                (void *)&ibuf0[(ii % B) * M * K],
+                tid);
+
+            commit_group();
+        }
+        else if (wid == 1) {
+            memcpy_async_1r_v2<32, M * K * sizeof(half)>(
+                (void *)&sbuf_in1[0][0],
+                (void *)&ibuf1[(ii % B) * M * K],
+                tid);
+
+            commit_group();
+        }
+        else {
+            memcpy_sync_1w<256, M * N * sizeof(half)>(
+                (void *)&obuf[(ii % B) * M * K],
+                (void *)&sbuf_out[0][0]);
+        }
+
+        wait_all();
+        __syncthreads();
+    }
+
+    wait_all();
+}
+
+void test_kernel_2r_1w_warp_specialized() {
+    printf("==== 2 Read Stream and 1 Write Stream (Warp Specialized) ====\n");
+    half * ibuf0;
+    half * ibuf1;
+    half * obuf;
+    cudaMalloc(&ibuf0, B * M * K * sizeof(half));
+    cudaMalloc(&ibuf1, B * M * K * sizeof(half));
+    cudaMalloc(&obuf, B * M * N * sizeof(half));
+
+    dim3 grid(1);
+    dim3 block(32, 3);
+    const size_t num_iters = 10000000;
+
+    printf("Running...\n");
+    float time_ms = cuda_time_kernel_ms(
+        [&]() { kernel_2r_1w_warp_specialized<<<grid, block>>>(num_iters, ibuf0, ibuf1, obuf); }
+    );
+
+    float bytes_rx = 2 * num_iters * M * K * sizeof(half);
+    float bytes_tx = num_iters * M * N * sizeof(half);
+    float tot_bytes = bytes_rx + bytes_tx;
+
+    printf("Took %f ms\n", time_ms);
+    printf("Read Bandwidth: %f GB/s\n", bytes_rx / time_ms / 1e6);
+    printf("Read Bytes per cycle: %f\n\n", bytes_rx / (time_ms * 1e-3 * 1.4e9));
+
+    printf("Write Bandwidth: %f GB/s\n", bytes_tx / time_ms / 1e6);
+    printf("Write Bytes per cycle: %f\n\n", bytes_tx / (time_ms * 1e-3 * 1.4e9));
+
+    printf("Total Bandwidth: %f GB/s\n", tot_bytes / time_ms / 1e6);
+    printf("Total Bytes per cycle: %f\n\n", tot_bytes / (time_ms * 1e-3 * 1.4e9));
+
+    cudaFree(ibuf0);
+    cudaFree(ibuf1);
+    cudaFree(obuf);
+}
 
 int main() {
+    test_cpasync_correctness();
     test_kernel_1r();
     test_kernel_1r_1w_sync();
     test_kernel_1r_1w_interleaved();
+    test_kernel_1r_1w_warp_specialized();
+    test_kernel_2r_1w_warp_specialized();
 }
 
