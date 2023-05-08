@@ -42,9 +42,9 @@ struct MgnNodeMlp {
     half out[m][d];
 
     static const size_t mblk = 64;
-    static const size_t s1_qlen  = 3;
-    static const size_t s12_qlen = 3;
-    static const size_t s23_qlen = 3;
+    static const size_t s1_qlen  = 2;
+    static const size_t s12_qlen = 2;
+    static const size_t s23_qlen = 2;
 
     using QEntry = QueueEntry2D<half, mblk, d>;
     using Stage1Queue = MpmcRingQueue<QEntry, s1_qlen, 1, 1>;
