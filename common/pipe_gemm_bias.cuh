@@ -183,9 +183,9 @@ __device__ void pipe_gemm_bias(
 
 
         typename Types::Epilogue::OutputTileIterator iterator_Bias(
-            typename Types::Epilogue::OutputTileIterator::Params({ProblemShape::kN}),
+            typename Types::Epilogue::OutputTileIterator::Params({0}),
             (cutlass::half_t *)bias,
-            {1, ProblemShape::kN},
+            {ProblemShape::kM, ProblemShape::kN},
             tb_thread_id
         );
 

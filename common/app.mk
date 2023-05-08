@@ -16,7 +16,7 @@ INCS+=-I$(CUTLASS_PATH)/tools/util/include
 
 default: $(APP).elf
 
-HDRS=$(wildcard *.cuh)
+HDRS=$(wildcard *.*h) $(wildcard ../common/*.*h) $(wildcard ../../common/*.*h)
 APP?=UNKNOWN
 
 $(APP).elf: $(APP).cu $(HDRS)

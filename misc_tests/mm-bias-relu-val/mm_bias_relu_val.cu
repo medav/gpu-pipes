@@ -52,7 +52,14 @@ struct Tensor {
 
     void rand_fill() {
         for (size_t i = 0; i < R * C; i++) {
-            host_ptr[i] = (float)rand() / RAND_MAX;
+            host_ptr[i] = 2.0f * ((float)rand() / (float)RAND_MAX - 0.5f);
+            // host_ptr[i] = (float)rand() / RAND_MAX;
+        }
+    }
+
+    void fill(float val) {
+        for (size_t i = 0; i < R * C; i++) {
+            host_ptr[i] = val;
         }
     }
 
@@ -72,40 +79,6 @@ struct Tensor {
         cudaFree(tmp_dev);
     }
 
-    Tensor operator*(const Tensor& w) const {
-        Tensor out(R, w.C);
-
-        for (size_t m = 0; m < R; m++) {
-            for (size_t n = 0; n < w.C; n++) {
-                float sum = 0.0f;
-                for (size_t k = 0; k < C; k++) {
-                    sum += host_ptr[m * C + k] * w.host_ptr[k * w.C + n];
-                }
-                out.host_ptr[m * w.C + n] = sum;
-            }
-        }
-
-        return out;
-    }
-
-    Tensor operator+(const Tensor& b) const {
-        Tensor out(R, C);
-
-        for (size_t r = 0; r < R; r++) {
-            for (size_t c = 0; c < C; c++) {
-                out.host_ptr[r * C + c] = host_ptr[r * C + c] + b.host_ptr[c];
-            }
-        }
-
-        return out;
-    }
-
-    void relu_() {
-        for (size_t i = 0; i < R * C; i++) {
-            host_ptr[i] = host_ptr[i] > 0.0f ? host_ptr[i] : 0.0f;
-        }
-    }
-
     void print() {
         for (size_t r = 0; r < R; r++) {
             for (size_t c = 0; c < C; c++) {
@@ -116,20 +89,80 @@ struct Tensor {
     }
 };
 
+__global__ void ref_gemm(half * x, half * w, half * out) {
+    int m = blockIdx.x * blockDim.x + threadIdx.x;
+    int n = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (m >= MM || n >= NN) return;
+
+    float sum = 0.0f;
+    for (int k = 0; k < KK; k++) {
+        sum += (float)x[m * KK + k] * (float)w[k * NN + n];
+    }
+    out[m * NN + n] = (half)sum;
+}
+
+__global__ void ref_gemm_bias(half * x, half * w, half * b, half * out) {
+    int m = blockIdx.x * blockDim.x + threadIdx.x;
+    int n = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (m >= MM || n >= NN) return;
+
+    float sum = 0.0f;
+    for (int k = 0; k < KK; k++) {
+        sum += (float)x[m * KK + k] * (float)w[k * NN + n];
+    }
+    sum += (float)b[n];
+    out[m * NN + n] = (half)sum;
+}
+
+__global__ void ref_gemm_bias_relu(half * x, half * w, half * b, half * out) {
+    int m = blockIdx.x * blockDim.x + threadIdx.x;
+    int n = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (m >= MM || n >= NN) return;
+
+    float sum = 0.0f;
+    for (int k = 0; k < KK; k++) {
+        sum += (float)x[m * KK + k] * (float)w[k * NN + n];
+    }
+    sum += (float)b[n];
+    out[m * NN + n] = sum > 0.0f ? (half)sum : (half)0.0f;
+}
+
+float rel_err(float a, float b, float eps = 1e-6f) {
+    return fabs(a - b) / ((a + b) / 2.0f + eps);
+}
+
 bool isclose(float a, float b, float rtol = 0.05) {
-    return fabs(a - b) / ((a + b) / 2.0f) < rtol;
+    return rel_err(a, b) < rtol;
 }
 
 
 void compare(Tensor& ref, Tensor& act) {
     for (size_t r = 0; r < ref.R; r++) {
         for (size_t c = 0; c < ref.C; c++) {
-            if (!isclose(ref.host_ptr[r * ref.C + c], act.host_ptr[r * act.C + c])) {
-                printf("Mismatch at %zu, %zu: %f != %f\n", r, c, ref.host_ptr[r * ref.C + c], act.host_ptr[r * act.C + c]);
-                return;
+            float ref_val = ref.host_ptr[r * ref.C + c];
+            float act_val = act.host_ptr[r * act.C + c];
+            if (!isclose(ref_val, act_val)) {
+                printf("Mismatch at %zu, %zu: %f != %f\n", r, c, ref_val, act_val);
             }
         }
     }
+}
+
+float l2(Tensor& a, Tensor& b) {
+    float sum_sq = 0.0f;
+    for (size_t r = 0; r < a.R; r++) {
+        for (size_t c = 0; c < a.C; c++) {
+            float ax = a.host_ptr[r * a.C + c];
+            float bx = b.host_ptr[r * a.C + c];
+
+            sum_sq += (ax - bx) * (ax - bx);
+        }
+    }
+
+    return sqrt(sum_sq);
 }
 
 void configure_smem(const void * func, const size_t smem) {
@@ -171,6 +204,7 @@ void test_pipe_gemm() {
     Tensor x(128, 128);
     Tensor w(128, 128);
     Tensor out(128, 128);
+    Tensor ref(128, 128);
 
     x.rand_fill();
     w.rand_fill();
@@ -178,19 +212,25 @@ void test_pipe_gemm() {
     x.to_dev();
     w.to_dev();
 
-    auto ref = x * w;
-
-    dim3 block(32, Types::num_warps);
     const size_t smem = sizeof(SmemBuffers);
     configure_smem((const void *)test_pipe_gemm_kernel, smem);
 
     cuda_time_kernel_ms([&] () {
+        dim3 block(32, Types::num_warps);
         test_pipe_gemm_kernel<<<1, block, smem>>>(
             x.dev_ptr, w.dev_ptr, out.dev_ptr);
     });
 
+    cuda_time_kernel_ms([&] () {
+        dim3 block(32, 32);
+        dim3 grid(4, 4);
+        ref_gemm<<<grid, block>>>(x.dev_ptr, w.dev_ptr, ref.dev_ptr);
+    });
+
     out.to_host();
+    ref.to_host();
     compare(ref, out);
+    printf("L2 error: %.6f\n", l2(ref, out));
     printf("\n");
 }
 
@@ -219,30 +259,38 @@ void test_pipe_gemm_bias() {
     printf("==== test_pipe_gemm_bias ====\n");
     Tensor x(128, 128);
     Tensor w(128, 128);
-    Tensor b(128, 128);
+    Tensor b(1, 128);
     Tensor out(128, 128);
+    Tensor ref(128, 128);
 
     x.rand_fill();
     w.rand_fill();
-    b.rand_fill();
+    b.fill(1.0f);
 
     x.to_dev();
     w.to_dev();
     b.to_dev();
 
-    auto ref = x * w + b;
-
-    dim3 block(32, Types::num_warps);
     const size_t smem = sizeof(SmemBuffers);
     configure_smem((const void *)test_pipe_gemm_bias_kernel, smem);
 
     cuda_time_kernel_ms([&] () {
+        dim3 block(32, Types::num_warps);
         test_pipe_gemm_bias_kernel<<<1, block, smem>>>(
             x.dev_ptr, w.dev_ptr, b.dev_ptr, out.dev_ptr);
     });
 
+    cuda_time_kernel_ms([&] () {
+        dim3 block(32, 32);
+        dim3 grid(4, 4);
+        ref_gemm_bias<<<grid, block>>>(
+            x.dev_ptr, w.dev_ptr, b.dev_ptr, ref.dev_ptr);
+    });
+
     out.to_host();
+    ref.to_host();
     compare(ref, out);
+    printf("L2 error: %.6f\n", l2(ref, out));
     printf("\n");
 }
 
@@ -271,19 +319,17 @@ void test_pipe_gemm_bias_relu() {
     printf("==== test_pipe_gemm_bias_relu ====\n");
     Tensor x(128, 128);
     Tensor w(128, 128);
-    Tensor b(128, 128);
+    Tensor b(1, 128);
     Tensor out(128, 128);
+    Tensor ref(128, 128);
 
     x.rand_fill();
     w.rand_fill();
-    b.rand_fill();
+    b.fill(1.0f);
 
     x.to_dev();
     w.to_dev();
     b.to_dev();
-
-    auto ref = x * w + b;
-    ref.relu_();
 
     dim3 block(32, Types::num_warps);
     const size_t smem = sizeof(SmemBuffers);
@@ -294,12 +340,22 @@ void test_pipe_gemm_bias_relu() {
             x.dev_ptr, w.dev_ptr, b.dev_ptr, out.dev_ptr);
     });
 
+    cuda_time_kernel_ms([&] () {
+        dim3 block(32, 32);
+        dim3 grid(4, 4);
+        ref_gemm_bias_relu<<<grid, block>>>(
+            x.dev_ptr, w.dev_ptr, b.dev_ptr, ref.dev_ptr);
+    });
+
     out.to_host();
+    ref.to_host();
     compare(ref, out);
+    printf("L2 error: %.6f\n", l2(ref, out));
     printf("\n");
 }
 
 int main(){
+    srand(time(0));
     test_pipe_gemm();
     test_pipe_gemm_bias();
     test_pipe_gemm_bias_relu();
