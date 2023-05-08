@@ -34,4 +34,14 @@ float cuda_time_kernel_ms(std::function<void(void)> func) {
     return time_ms;
 }
 
+__global__ void float_to_half(half * dst, float * src, size_t N) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < N) dst[idx] = __float2half(src[idx]);
+}
+
+__global__ void half_to_float(float * dst, half * src, size_t N) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < N) dst[idx] = __half2float(src[idx]);
+}
+
 #define CLD(N, D) ((N + D - 1) / D)
