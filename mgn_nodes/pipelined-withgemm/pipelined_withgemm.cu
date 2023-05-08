@@ -1,10 +1,24 @@
 #include "mgn_node_pipe.cuh"
-#include "pipe.cuh"
-#include "pipegemm2.cuh"
+#include "pipes.cuh"
+#include "pipe_gemm.cuh"
+#include "pipe_gemm_bias.cuh"
+#include "pipe_gemm_bias_relu.cuh"
 
 #include "utils.cuh"
 
-const size_t max_smem = sizeof(SmemBuffers);
+using ProblemShape = cutlass::gemm::GemmShape<MgnNodeMlp::mblk, 128, 128>;
+
+const size_t max_smem = std::max({
+    sizeof(typename PipeGemm<ProblemShape>::SmemBuffers),
+    sizeof(typename PipeGemmBias<ProblemShape>::SmemBuffers),
+    sizeof(typename PipeGemmBiasRelu<ProblemShape>::SmemBuffers)
+});
+
+const size_t max_warps = std::max({
+    PipeGemm<ProblemShape>::num_warps,
+    PipeGemmBias<ProblemShape>::num_warps,
+    PipeGemmBiasRelu<ProblemShape>::num_warps
+});
 
 __device__ void mlp0_sm0(void * smem, MgnNodeMlp *prob, size_t row) {
     using Input = MemoryReader;
@@ -20,12 +34,12 @@ __device__ void mlp0_sm0(void * smem, MgnNodeMlp *prob, size_t row) {
 
     for (size_t i = 0; i < MgnNodeMlp::ni; i++) {
         input.reset();
-        gemmpipe<
+        pipe_gemm<
             cutlass::gemm::GemmShape<mblk, 128, 128>,
             Input,
             Accum,
             Output
-        >(smem, &prob->w1[0][0][0], input, accum, output, num_iters);
+        >(&prob->w1[0][0][0], input, accum, output, num_iters);
     }
 }
 
@@ -43,12 +57,12 @@ __device__ void mlp0_sm1(void * smem, MgnNodeMlp *prob, size_t row) {
 
     for (size_t i = 0; i < MgnNodeMlp::ni; i++) {
         input.reset();
-        gemmpipe<
+        pipe_gemm<
             cutlass::gemm::GemmShape<mblk, 128, 128>,
             Input,
             Accum,
             Output
-        >(smem, &prob->w1[1][0][0], input, accum, output, num_iters);
+        >(&prob->w1[1][0][0], input, accum, output, num_iters);
     }
 }
 
@@ -67,12 +81,12 @@ __device__ void mlp0_sm2(void * smem, MgnNodeMlp *prob, size_t row) {
 
     for (size_t i = 0; i < MgnNodeMlp::ni; i++) {
         input.reset();
-        gemmpipe<
+        pipe_gemm_bias_relu<
             cutlass::gemm::GemmShape<mblk, 128, 128>,
             Input,
             Accum,
             Output
-        >(smem, &prob->w1[2][0][0], input, accum, output, num_iters);
+        >(&prob->w1[2][0][0], &prob->b1[0], input, accum, output, num_iters);
     }
 }
 
@@ -89,12 +103,12 @@ __device__ void mlp1_sm0(void * smem, MgnNodeMlp *prob, size_t row) {
     Output output(prob->qs.q23[row]);
 
     for (size_t i = 0; i < MgnNodeMlp::ni; i++) {
-        gemmpipe<
+        pipe_gemm_bias_relu<
             cutlass::gemm::GemmShape<mblk, 128, 128>,
             Input,
             Accum,
             Output
-        >(smem, &prob->w2[0][0], input, accum, output, num_iters);
+        >(&prob->w2[0][0], &prob->b2[0], input, accum, output, num_iters);
     }
 }
 
@@ -113,12 +127,12 @@ __device__ void mlp2_sm0(void * smem, MgnNodeMlp *prob, size_t row) {
 
     for (size_t i = 0; i < MgnNodeMlp::ni; i++) {
         output.reset();
-        gemmpipe<
+        pipe_gemm_bias<
             cutlass::gemm::GemmShape<mblk, 128, 128>,
             Input,
             Accum,
             Output
-        >(smem, &prob->w3[0][0], input, accum, output, num_iters);
+        >(&prob->w3[0][0], &prob->b3[0], input, accum, output, num_iters);
     }
 }
 
@@ -210,13 +224,13 @@ int main() {
 
     dim3 grid(5, MgnNodeMlp::mo);
     // dim3 grid(5, 1);
-    dim3 block(32, num_warps);
+    dim3 block(32, max_warps);
 
     const size_t tot_loop_iters = MgnNodeMlp::ni * MgnNodeMlp::mi / MgnNodeMlp::mblk;
     printf("Total loop iters: %lu\n", tot_loop_iters);
 
     printf("SMEM: %lu\n", max_smem);
-    printf("# Warps: %lu\n", num_warps);
+    printf("# Warps: %lu\n", max_warps);
 
     printf("Running...\n");
     float time_ms = cuda_time_kernel_ms(

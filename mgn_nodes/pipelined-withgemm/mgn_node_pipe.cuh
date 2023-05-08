@@ -29,9 +29,16 @@ struct MgnNodeMlp {
     static const size_t d = 128;
 
     half in[3][m][d];
+
     half w1[3][d][d];
+    half b1[d];
+
     half w2[d][d];
+    half b2[d];
+
     half w3[d][d];
+    half b3[d];
+
     half out[m][d];
 
     static const size_t mblk = 64;
