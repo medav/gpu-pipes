@@ -1,6 +1,6 @@
 #include "mgn_node_pipe.cuh"
-#include "pipe.cuh"
-#include "pipegemm3.cuh"
+#include "pipes.cuh"
+#include "pipegemm.cuh"
 
 #include "utils.cuh"
 

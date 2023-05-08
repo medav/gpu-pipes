@@ -1,3 +1,3 @@
 
-APP=pipelined_nogemm_cust
+APP=pipelined_fullmlp
 include ../../../common/app.mk

@@ -7,21 +7,20 @@ LIBS?=
 LIBS+=-L$(CUTLASS_LIB) -lcutlass
 
 INCS?=
+INCS+=-I../common -I../../common -I../../../common
 INCS+=-I$(CUTLASS_INC) -I$(CUTLASS_PATH)/tools/util/include/
 INCS+=-I$(CUTLASS_PATH)/tools/util/include
 
 
 .PHONY: default run objdump gdb
 
-default: run
+default: $(APP).elf
 
 HDRS=$(wildcard *.cuh)
-# APP=test_mgn_node_pipe
-APP=test_mgn_node_pipe
+APP?=UNKNOWN
 
-$(APP): $(APP).cu $(HDRS)
+$(APP).elf: $(APP).cu $(HDRS)
 	/usr/local/cuda/bin/nvcc \
-		-DCUTLASS_ENABLE_L2_PREFETCH \
 		--expt-relaxed-constexpr \
 		-O3 \
 		-std=c++17 \
@@ -32,16 +31,16 @@ $(APP): $(APP).cu $(HDRS)
 		$<
 
 clean:
-	rm -f $(APP)
+	rm -f $(APP).elf
 
-run: $(APP)
-	LD_LIBRARY_PATH=$(CUTLASS_LIB) ./$(APP)
+run: $(APP).elf
+	LD_LIBRARY_PATH=$(CUTLASS_LIB) ./$(APP).elf
 
-gdb: $(APP)
-	LD_LIBRARY_PATH=$(CUTLASS_LIB) /usr/local/cuda/bin/cuda-gdb ./$(APP)
+gdb: $(APP).elf
+	LD_LIBRARY_PATH=$(CUTLASS_LIB) /usr/local/cuda/bin/cuda-gdb ./$(APP).elf
 
-memcheck: $(APP)
-	LD_LIBRARY_PATH=$(CUTLASS_LIB) /usr/local/cuda/bin/cuda-memcheck ./$(APP)
+memcheck: $(APP).elf
+	LD_LIBRARY_PATH=$(CUTLASS_LIB) /usr/local/cuda/bin/cuda-memcheck ./$(APP).elf
 
-objdump: $(APP)
-	/usr/local/cuda/bin/cuobjdump --dump-ptx $(APP)
+objdump: $(APP).elf
+	/usr/local/cuda/bin/cuobjdump --dump-ptx $(APP).elf

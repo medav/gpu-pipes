@@ -1,6 +1,6 @@
 #include "mgn_node_pipe.cuh"
-#include "pipe.cuh"
-#include "pipegemm3.cuh"
+#include "pipes.cuh"
+#include "pipegemm.cuh"
 
 #include "utils.cuh"
 
@@ -110,7 +110,6 @@ __device__ void mlp2_sm0(void * smem, MgnNodeMlp *prob, size_t row) {
 template<typename QT>
 __device__ void consume_dummy(QT& q, size_t num_iters) {
     QueueReader<QT> r(q);
-
     r.reset();
 
     for (size_t i = 0; i < num_iters; i++) {
@@ -129,6 +128,11 @@ __global__ void kernel(MgnNodeMlp * prob) {
         case 0:
             mlp0_sm0(smem, prob, pipe_row);
             break;
+
+        // case 1:
+        //     consume_dummy(prob->qs.q1_01[pipe_row], prob->mi / MgnNodeMlp::mblk);
+        //     break;
+
         case 1:
             mlp0_sm1(smem, prob, pipe_row);
             break;

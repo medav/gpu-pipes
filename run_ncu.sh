@@ -16,6 +16,8 @@ set -e
 RUN_NCU=${RUN_NCU:-yes}
 [ "$RUN_NCU" = "no" ] && exit 0
 
+ODIR=$CASIO/output/$PLAT/$APP/
+
 
 SAMP=${SAMP:-all}
 
@@ -48,6 +50,7 @@ echo "Using ncu: $NCU"
 
 NW=1 NI=1 MODE=ncu $NCU \
     $SAMP_NCU_FLAG \
+    -k kernel \
     --target-processes all \
-    --metrics sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_elapsed \
+    --metrics gpu__time_duration.sum,sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_elapsed,gpu__dram_throughput.avg.pct_of_peak_sustained_elapsed,sm__inst_executed_pipe_fp16.avg.pct_of_peak_sustained_elapsed \
     $*
