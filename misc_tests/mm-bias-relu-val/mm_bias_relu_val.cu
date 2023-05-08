@@ -24,192 +24,13 @@
 #include "pipes.cuh"
 #include "utils.cuh"
 
+#include "pipe_gemm.cuh"
+#include "pipe_gemm_bias.cuh"
+#include "pipe_gemm_bias_relu.cuh"
+
 #define MM 128
 #define NN 128
 #define KK 128
-
-using Kernel = typename cutlass::gemm::kernel::DefaultGemmUniversal<
-    cutlass::half_t, cutlass::layout::RowMajor, cutlass::ComplexTransform::kNone, 8,    // transposed B operand
-    cutlass::half_t, cutlass::layout::RowMajor, cutlass::ComplexTransform::kNone, 8,    // transposed A operand
-    cutlass::half_t, cutlass::layout::RowMajor,
-    cutlass::half_t,
-    cutlass::arch::OpClassTensorOp,
-    cutlass::arch::Sm80,
-    cutlass::gemm::GemmShape<MM, NN, 32>, // threadblock tile
-    cutlass::gemm::GemmShape<64, 64, 32>,   // warp tile
-    cutlass::gemm::GemmShape<16, 8, 16>,    // instruction tile
-    cutlass::epilogue::thread::LinearCombination<
-      cutlass::half_t,
-      8,
-      cutlass::half_t,
-      cutlass::half_t
-    >,
-    cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<8>,
-    3,
-    cutlass::arch::OpMultiplyAdd
->::DefaultGemmKernel;
-
-// Define the epilogue operation as LinearCombinationRelu. This is approximately equal to
-//
-//    d_ij = max(0, alpha * sum_k(a_ik * b_kj) + c_ij )
-//
-using EpilogueOp = cutlass::epilogue::thread::LinearCombinationRelu<
-    cutlass::half_t,                                        // <- data type of output matrix
-    128 / cutlass::sizeof_bits<cutlass::half_t>::value,     // <- this is the number of elements per
-                                                          // vectorized memory access. For half
-                                                          // precision, it's 8 elements. This becomes
-                                                          // the vector width of math instructions in
-                                                          // epilogue too
-    cutlass::half_t,                                   // <- data type of accumulator
-    cutlass::half_t,                               // <- data type for alpha in linear combination function
-    cutlass::epilogue::thread::ScaleType::NoBetaScaling>; // <- alpha x C + bias
-
-
-using Mma = Kernel::Mma;
-using IteratorA = Kernel::Mma::IteratorA;
-using IteratorB = Kernel::Mma::IteratorB;
-
-static const int kPartitionsK = 1; //ThreadblockShape::kK / WarpShape::kK;
-
-using Epilogue = typename cutlass::epilogue::threadblock::DefaultEpilogueTensorOp<
-        cutlass::gemm::GemmShape<MM, NN, 32>,
-        typename Mma::Operator,
-        kPartitionsK,
-        EpilogueOp,
-        EpilogueOp::kCount,
-        false, // ScatterD
-        cutlass::layout::NoPermute>::Epilogue;
-
-constexpr size_t num_warps = Mma::WarpCount::kCount;
-
-struct SmemBuffers {
-    typename Mma::SharedStorage mma_storage;
-    typename Epilogue::SharedStorage epilogue_storage;
-};
-
-template<
-    typename ProblemShape,
-    typename InputReader,
-    typename AccumReader,
-    typename OutputWriter>
-__device__ void gemmpipe(
-    half * weight,
-    half * bias,
-    InputReader& ir,
-    AccumReader& ar,
-    OutputWriter& ow,
-    size_t num_iters
-) {
-    extern __shared__ uint8_t smem_raw[];
-    SmemBuffers * smem = reinterpret_cast<SmemBuffers *>(smem_raw);
-
-    cutlass::MatrixCoord tb_offset_A {0, 0};
-    cutlass::MatrixCoord tb_offset_B {0, 0};
-
-    const int tb_thread_id = threadIdx.y * blockDim.x + threadIdx.x;
-    const int warp_id = __shfl_sync(0xffffffff, threadIdx.y, 0);
-    const int lane_id = threadIdx.x;
-    const int warp_idx_mn = warp_id % (Mma::WarpCount::kM * Mma::WarpCount::kN);
-
-    typename Mma::FragmentC accum;
-
-    for (size_t i = 0; i < num_iters; i++) {
-        half * i_ptr = ir.read_acquire();
-
-        typename Mma::IteratorA iterator_A(
-            {{ProblemShape::kK}},
-            (cutlass::half_t *)i_ptr,
-            {ProblemShape::kM, ProblemShape::kK},
-            tb_thread_id,
-            tb_offset_A);
-
-        typename Mma::IteratorB iterator_B(
-            {{ProblemShape::kN}},
-            (cutlass::half_t *)weight,
-            {ProblemShape::kK, ProblemShape::kN},
-            tb_thread_id,
-            tb_offset_B);
-
-        Mma gemm_op(smem->mma_storage, tb_thread_id, warp_id, threadIdx.x);
-
-        half * acc_ptr = ar.read_acquire();
-        if (acc_ptr == nullptr) {
-            accum.clear();
-        }
-        else {
-            typename Mma::Operator::IteratorC iterator_Acc(
-                {(typename Mma::ElementC *)acc_ptr, (int)ProblemShape::kN}, lane_id);
-
-            iterator_Acc.add_tile_offset({
-                (warp_idx_mn % Mma::WarpCount::kM),
-                (warp_idx_mn / Mma::WarpCount::kM)
-            });
-
-            iterator_Acc.load(accum);
-        }
-
-        ar.read_release();
-
-        gemm_op(
-            CLD(ProblemShape::kK, Mma::Shape::kK),
-            accum,
-            iterator_A,
-            iterator_B,
-            accum);
-
-        ir.read_release();
-
-
-        half * o_ptr = ow.write_acquire();
-
-        // Output results
-        // typename Mma::Operator::IteratorC iterator_C(
-        //     {(typename Mma::ElementC *)o_ptr, (int)ProblemShape::kN},
-        //     lane_id);
-
-        // iterator_C.add_tile_offset({
-        //     (warp_idx_mn % Mma::WarpCount::kM),
-        //     (warp_idx_mn / Mma::WarpCount::kM)
-        // });
-
-        // iterator_C.store(accum);
-
-        Epilogue epilogue(
-            smem->epilogue_storage,
-            tb_thread_id,
-            warp_id,
-            lane_id);
-
-        typename Epilogue::OutputTileIterator iterator_C(
-            typename Epilogue::OutputTileIterator::Params({ProblemShape::kN}),
-            (cutlass::half_t *)o_ptr,
-            {ProblemShape::kM, ProblemShape::kN},
-            tb_thread_id
-        );
-
-
-        typename Epilogue::OutputTileIterator iterator_Bias(
-            typename Epilogue::OutputTileIterator::Params({ProblemShape::kN}),
-            (cutlass::half_t *)bias,
-            {1, ProblemShape::kN},
-            tb_thread_id
-        );
-
-
-        typename Epilogue::OutputOp output_op(
-            typename Epilogue::OutputOp::Params(
-                (cutlass::half_t)1.0f,
-                (cutlass::half_t)0.0f,
-                (cutlass::half_t)0.0f
-            )
-        );
-        epilogue(output_op, iterator_C, accum, iterator_Bias);
-
-        __syncthreads();
-
-        ow.write_release();
-    }
-}
 
 
 struct Tensor {
@@ -295,24 +116,6 @@ struct Tensor {
     }
 };
 
-__global__ void kernel(half * x, half * w, half * b, half * out) {
-    using Input = MemoryReader;
-    using Accum = NullReader;
-    using Output = MemoryWriter;
-
-    Input ir(x, 0);
-    Accum ar;
-    Output ow(out, 0);
-
-    gemmpipe<
-        cutlass::gemm::GemmShape<MM, NN, KK>,
-        Input,
-        Accum,
-        Output
-    >(w, b, ir, ar, ow, 1);
-
-}
-
 bool isclose(float a, float b, float rtol = 0.05) {
     return fabs(a - b) / ((a + b) / 2.0f) < rtol;
 }
@@ -329,7 +132,91 @@ void compare(Tensor& ref, Tensor& act) {
     }
 }
 
-int main(){
+void configure_smem(const void * func, const size_t smem) {
+    cudaErrCheck(cudaDeviceSetCacheConfig(cudaFuncCachePreferShared));
+    cudaErrCheck(cudaFuncSetAttribute(
+        func,
+        cudaFuncAttributePreferredSharedMemoryCarveout,
+        cudaSharedmemCarveoutMaxShared));
+
+    cudaErrCheck(cudaFuncSetAttribute(
+        func,
+        cudaFuncAttributeMaxDynamicSharedMemorySize,
+        smem));
+}
+
+__global__ void test_pipe_gemm_kernel(half * x, half * w, half * out) {
+    using Input = MemoryReader;
+    using Accum = NullReader;
+    using Output = MemoryWriter;
+
+    Input ir(x, 0);
+    Accum ar;
+    Output ow(out, 0);
+
+    pipe_gemm<
+        cutlass::gemm::GemmShape<MM, NN, KK>,
+        Input,
+        Accum,
+        Output
+    >(w, ir, ar, ow, 1);
+}
+
+
+void test_pipe_gemm() {
+    using Types = PipeGemm<cutlass::gemm::GemmShape<MM, NN, KK>>;
+    using SmemBuffers = Types::SmemBuffers;
+
+    printf("==== test_pipe_gemm ====\n");
+    Tensor x(128, 128);
+    Tensor w(128, 128);
+    Tensor out(128, 128);
+
+    x.rand_fill();
+    w.rand_fill();
+
+    x.to_dev();
+    w.to_dev();
+
+    auto ref = x * w;
+
+    dim3 block(32, Types::num_warps);
+    const size_t smem = sizeof(SmemBuffers);
+    configure_smem((const void *)test_pipe_gemm_kernel, smem);
+
+    cuda_time_kernel_ms([&] () {
+        test_pipe_gemm_kernel<<<1, block, smem>>>(
+            x.dev_ptr, w.dev_ptr, out.dev_ptr);
+    });
+
+    out.to_host();
+    compare(ref, out);
+    printf("\n");
+}
+
+__global__ void test_pipe_gemm_bias_kernel(half * x, half * w, half * b, half * out) {
+    using Input = MemoryReader;
+    using Accum = NullReader;
+    using Output = MemoryWriter;
+
+    Input ir(x, 0);
+    Accum ar;
+    Output ow(out, 0);
+
+    pipe_gemm_bias<
+        cutlass::gemm::GemmShape<MM, NN, KK>,
+        Input,
+        Accum,
+        Output
+    >(w, b, ir, ar, ow, 1);
+}
+
+
+void test_pipe_gemm_bias() {
+    using Types = PipeGemmBias<cutlass::gemm::GemmShape<MM, NN, KK>>;
+    using SmemBuffers = Types::SmemBuffers;
+
+    printf("==== test_pipe_gemm_bias ====\n");
     Tensor x(128, 128);
     Tensor w(128, 128);
     Tensor b(128, 128);
@@ -343,38 +230,78 @@ int main(){
     w.to_dev();
     b.to_dev();
 
-    // auto ref = x * w;
+    auto ref = x * w + b;
+
+    dim3 block(32, Types::num_warps);
+    const size_t smem = sizeof(SmemBuffers);
+    configure_smem((const void *)test_pipe_gemm_bias_kernel, smem);
+
+    cuda_time_kernel_ms([&] () {
+        test_pipe_gemm_bias_kernel<<<1, block, smem>>>(
+            x.dev_ptr, w.dev_ptr, b.dev_ptr, out.dev_ptr);
+    });
+
+    out.to_host();
+    compare(ref, out);
+    printf("\n");
+}
+
+__global__ void test_pipe_gemm_bias_relu_kernel(half * x, half * w, half * b, half * out) {
+    using Input = MemoryReader;
+    using Accum = NullReader;
+    using Output = MemoryWriter;
+
+    Input ir(x, 0);
+    Accum ar;
+    Output ow(out, 0);
+
+    pipe_gemm_bias_relu<
+        cutlass::gemm::GemmShape<MM, NN, KK>,
+        Input,
+        Accum,
+        Output
+    >(w, b, ir, ar, ow, 1);
+}
+
+
+void test_pipe_gemm_bias_relu() {
+    using Types = PipeGemmBiasRelu<cutlass::gemm::GemmShape<MM, NN, KK>>;
+    using SmemBuffers = Types::SmemBuffers;
+
+    printf("==== test_pipe_gemm_bias_relu ====\n");
+    Tensor x(128, 128);
+    Tensor w(128, 128);
+    Tensor b(128, 128);
+    Tensor out(128, 128);
+
+    x.rand_fill();
+    w.rand_fill();
+    b.rand_fill();
+
+    x.to_dev();
+    w.to_dev();
+    b.to_dev();
 
     auto ref = x * w + b;
     ref.relu_();
 
-    dim3 block(32, num_warps);
-
+    dim3 block(32, Types::num_warps);
     const size_t smem = sizeof(SmemBuffers);
-
-    cudaErrCheck(cudaDeviceSetCacheConfig(cudaFuncCachePreferShared));
-    cudaErrCheck(cudaFuncSetAttribute(
-        kernel,
-        cudaFuncAttributePreferredSharedMemoryCarveout,
-        cudaSharedmemCarveoutMaxShared));
-
-    cudaErrCheck(cudaFuncSetAttribute(
-        kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem));
+    configure_smem((const void *)test_pipe_gemm_bias_relu_kernel, smem);
 
     cuda_time_kernel_ms([&] () {
-        kernel<<<1, block, smem>>>(x.dev_ptr, w.dev_ptr, b.dev_ptr, out.dev_ptr);
+        test_pipe_gemm_bias_relu_kernel<<<1, block, smem>>>(
+            x.dev_ptr, w.dev_ptr, b.dev_ptr, out.dev_ptr);
     });
 
     out.to_host();
-
-    // printf("== Actual ==\n");
-    // out.print();
-    // printf("\n");
-
-    // printf("== Reference ==\n");
-    // ref.print();
-
     compare(ref, out);
+    printf("\n");
+}
 
+int main(){
+    test_pipe_gemm();
+    test_pipe_gemm_bias();
+    test_pipe_gemm_bias_relu();
     return 0;
 }
