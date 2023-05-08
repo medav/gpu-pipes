@@ -6,10 +6,10 @@
 
 struct MemoryReader {
     half * const base;
-    const int stride;
-    int offset;
+    const size_t stride;
+    size_t offset;
 
-    __device__ MemoryReader(half * const base, int stride) :
+    __device__ MemoryReader(half * const base, size_t stride) :
         base(base), stride(stride), offset(0) {}
 
     __device__ half* read_acquire() { return base + offset; }
@@ -27,9 +27,9 @@ template <typename QT>
 struct QueueReader {
     using Queue = QT;
     Queue& q;
-    int seq_n;
+    size_t seq_n;
 
-    __device__ QueueReader(Queue& q) : q(q), seq_n(0) {}
+    __device__ QueueReader(Queue& q) : q(q), seq_n(0) { }
     __device__ half* read_acquire() { return q.read_wait(seq_n).as_ptr(); }
     __device__ void read_release() { q.read_commit(seq_n); seq_n++; }
     __device__ void reset() { seq_n = 0; }
@@ -37,10 +37,10 @@ struct QueueReader {
 
 struct MemoryWriter {
     half * base;
-    const int stride;
-    int offset;
+    const size_t stride;
+    size_t offset;
 
-    __device__ MemoryWriter(half * base, int stride) :
+    __device__ MemoryWriter(half * base, size_t stride) :
         base(base), stride(stride), offset(0) {}
 
     __device__ half* write_acquire() { return base + offset; }
@@ -52,9 +52,9 @@ template <typename QT>
 struct QueueWriter {
     using Queue = QT;
     Queue& q;
-    int seq_n;
+    size_t seq_n;
 
-    __device__ QueueWriter(Queue& q) : q(q), seq_n(0) {}
+    __device__ QueueWriter(Queue& q) : q(q), seq_n(0) { q.reset(); }
     __device__ half* write_acquire() { return q.write_wait(seq_n).as_ptr(); }
     __device__ void write_release() { q.write_commit(seq_n++); }
     __device__ void reset() { seq_n = 0; q.reset(); }
@@ -62,6 +62,6 @@ struct QueueWriter {
 
 struct NullWriter {
     __device__ half* write_acquire() { return nullptr; }
-    __device__ void write_release() { }
-    __device__ void reset() { }
+    __device__ void write_release() {}
+    __device__ void reset() {}
 };

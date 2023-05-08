@@ -1,3 +1,3 @@
 
-APP=pipelined_nogemm_cust
+APP=pipelined_warp_specialized
 include ../../../common/app.mk

@@ -149,7 +149,11 @@ struct GemmPipe {
                 half * o_buf = &bufs->obuf[(i + 1) % 2][0][0];
                 memcpy_sync_1w<num_gemm_warps * 32, M * N * sizeof(half)>(
                     o_ptr, o_buf, group_tid);
+
+                // GEMM WOULD GO HERE
             }
+
+
 
 
             wait_all();

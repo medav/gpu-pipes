@@ -10,6 +10,7 @@
 #include "cutlass/epilogue/thread/linear_combination.h"
 #include "cutlass/epilogue/warp/fragment_iterator_tensor_op.h"
 #include "cutlass/epilogue/warp/tile_iterator_tensor_op.h"
+#include "cutlass/epilogue/threadblock/default_epilogue_tensor_op.h"
 
 #include "cutlass/arch/wmma.h"
 #include "cutlass/numeric_types.h"
@@ -45,15 +46,42 @@ using Kernel = typename cutlass::gemm::kernel::DefaultGemmUniversal<
     cutlass::arch::OpMultiplyAdd
 >::DefaultGemmKernel;
 
+// Define the epilogue operation as LinearCombinationRelu. This is approximately equal to
+//
+//    d_ij = max(0, alpha * sum_k(a_ik * b_kj) + c_ij )
+//
+using EpilogueOp = cutlass::epilogue::thread::LinearCombinationRelu<
+    cutlass::half_t,                                        // <- data type of output matrix
+    128 / cutlass::sizeof_bits<cutlass::half_t>::value,     // <- this is the number of elements per
+                                                          // vectorized memory access. For half
+                                                          // precision, it's 8 elements. This becomes
+                                                          // the vector width of math instructions in
+                                                          // epilogue too
+    cutlass::half_t,                                   // <- data type of accumulator
+    cutlass::half_t,                               // <- data type for alpha in linear combination function
+    cutlass::epilogue::thread::ScaleType::NoBetaScaling>; // <- alpha x C + bias
+
+
 using Mma = Kernel::Mma;
 using IteratorA = Kernel::Mma::IteratorA;
 using IteratorB = Kernel::Mma::IteratorB;
 
+static const int kPartitionsK = 1; //ThreadblockShape::kK / WarpShape::kK;
+
+using Epilogue = typename cutlass::epilogue::threadblock::DefaultEpilogueTensorOp<
+        cutlass::gemm::GemmShape<MgnNodeMlp::mblk, 128, 32>,
+        typename Mma::Operator,
+        kPartitionsK,
+        EpilogueOp,
+        EpilogueOp::kCount,
+        false, // ScatterD
+        cutlass::layout::NoPermute>::Epilogue;
+
 constexpr size_t num_warps = Mma::WarpCount::kCount;
 
-template<size_t M, size_t N, size_t K>
 struct SmemBuffers {
-    typename Mma::SharedStorage storage;
+    typename Mma::SharedStorage mma_storage;
+    typename Epilogue::SharedStorage epilogue_storage;
 };
 
 template<
@@ -69,13 +97,12 @@ __device__ void gemmpipe(
     OutputWriter& ow,
     size_t num_iters
 ) {
-    extern __shared__ char smem[];
-    typename Mma::SharedStorage * shared_storage =
-        reinterpret_cast<typename Mma::SharedStorage *>(smem);
+    extern __shared__ char smem_raw[];
+    SmemBuffers * smem = reinterpret_cast<SmemBuffers *>(smem_raw);
 
-    ir.reset();
-    ar.reset();
-    ow.reset();
+    // ir.reset();
+    // ar.reset();
+    // ow.reset();
 
     cutlass::MatrixCoord tb_offset_A {0, 0};
     cutlass::MatrixCoord tb_offset_B {0, 0};
@@ -104,7 +131,7 @@ __device__ void gemmpipe(
             tb_thread_id,
             tb_offset_B);
 
-        Mma gemm_op(*shared_storage, tb_thread_id, warp_id, threadIdx.x);
+        Mma gemm_op(smem->mma_storage, tb_thread_id, warp_id, threadIdx.x);
 
         half * acc_ptr = ar.read_acquire();
         if (acc_ptr == nullptr) {
@@ -133,18 +160,50 @@ __device__ void gemmpipe(
 
         ir.read_release();
 
+        Epilogue epilogue(
+            smem->epilogue_storage,
+            tb_thread_id,
+            warp_id,
+            lane_id);
+
         half * o_ptr = ow.write_acquire();
 
         // Output results
-        typename Mma::Operator::IteratorC iterator_C(
-            {(typename Mma::ElementC *)o_ptr, (int)ProblemShape::kN}, lane_id);
+        // typename Mma::Operator::IteratorC iterator_C(
+        //     {(typename Mma::ElementC *)o_ptr, (int)ProblemShape::kN}, lane_id);
 
-        iterator_C.add_tile_offset({
-            (warp_idx_mn % Mma::WarpCount::kM),
-            (warp_idx_mn / Mma::WarpCount::kM)
-        });
+        typename Epilogue::OutputTileIterator iterator_C(
+            typename Epilogue::OutputTileIterator::Params({ProblemShape::kN}),
+            (cutlass::half_t *)o_ptr,
+            {ProblemShape::kM, ProblemShape::kN},
+            tb_thread_id
+        );
 
-        iterator_C.store(accum);
+
+        typename Epilogue::OutputTileIterator iterator_Bias(
+            typename Epilogue::OutputTileIterator::Params({ProblemShape::kN}),
+            (cutlass::half_t *)o_ptr,
+            {1, ProblemShape::kN},
+            tb_thread_id
+        );
+
+        // iterator_C.add_tile_offset({
+        //     (warp_idx_mn % Mma::WarpCount::kM),
+        //     (warp_idx_mn / Mma::WarpCount::kM)
+        // });
+
+        // iterator_C.store(accum);
+
+        typename Epilogue::OutputOp output_op(
+            typename Epilogue::OutputOp::Params(
+                (cutlass::half_t)1.0f,
+                (cutlass::half_t)0.0f,
+                (cutlass::half_t)0.0f
+            )
+        );
+        epilogue(output_op, iterator_C, accum, iterator_Bias);
+
+        __syncthreads();
 
         ow.write_release();
     }
