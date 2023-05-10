@@ -11,7 +11,6 @@
 #define CHECK_INPUT(x) CHECK_CUDA(x); CHECK_CONTIGUOUS(x)
 
 
-
 at::Tensor layer_norm_128(
     at::Tensor x,
     at::Tensor gamma,
@@ -21,18 +20,21 @@ at::Tensor layer_norm_128(
     CHECK_INPUT(gamma);
     CHECK_INPUT(beta);
 
+    const int MBLK = 64;
+
     at::Tensor out = at::empty_like(x);
 
     assert(x.size(1) == 128);
 
-    dim3 block(32, 2);
+    dim3 grid(x.size(0) / MBLK);
+    dim3 block(32, 4);
 
-    layer_norm<128><<<1, block>>>(
+    device_layer_norm<MBLK, 128><<<grid, block>>>(
         (half *)x.data_ptr<at::Half>(),
         (half *)gamma.data_ptr<at::Half>(),
         (half *)beta.data_ptr<at::Half>(),
         (half *)out.data_ptr<at::Half>(),
-        (int)x.size(0)
+        (const int)x.size(0)
     );
 
     return out;
