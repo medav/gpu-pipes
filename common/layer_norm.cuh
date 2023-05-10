@@ -27,7 +27,6 @@ __device__ void internal_layer_norm(
     const int warp = threadIdx.y;
     const int thread = warp * 32 + lane;
     const int num_threads = blockDim.x * blockDim.y;
-    if (lane == 0 && warp == 0) printf("num_threads = %d\n", num_threads);
     __syncwarp();
 
     half * shared_in[2] = {&sbuf[0], &sbuf[D]};
@@ -70,8 +69,6 @@ __device__ void internal_layer_norm(
 
         __syncthreads();
         float mean = *shared_mean / D;
-
-        if (lane == 0 && warp == 0) printf("Row: %d, mean: %f\n", m, mean);
 
         for (int d = thread; d < D; d += num_threads) {
             float x = __half2float(in_ptr[d]);
