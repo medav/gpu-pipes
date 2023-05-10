@@ -51,6 +51,27 @@ __device__ void memcpy_async_1r_v2(
     }
 }
 
+template<int NBYTES>
+__device__ void memcpy_async_1r_v3(
+    void *dst,
+    void const *src,
+    const int tid,
+    const int nthread
+) {
+    const int offset = tid * 16;
+    const int stride = nthread * 16;
+
+    char * dst_ptr = ((char *)dst) + offset;
+    char * src_ptr = ((char *)src) + offset;
+
+    #pragma unroll
+    for (int i = offset; i < NBYTES; i += stride) {
+        cp_async16(dst_ptr, src_ptr);
+        dst_ptr += stride;
+        src_ptr += stride;
+    }
+}
+
 template<int NTHREAD, int NBYTES, int BPT=4>
 __device__ void memcpy_sync_1w(void *dst, void const *src, const int tid) {
     const int offset = tid * BPT;
