@@ -24,9 +24,12 @@
 #include "pipes.cuh"
 #include "utils.cuh"
 
+#include "layer_norm.cuh"
+
 #include "pipe_gemm.cuh"
 #include "pipe_gemm_bias.cuh"
 #include "pipe_gemm_bias_relu.cuh"
+#include "pipe_gemm_bias_layer_norm.cuh"
 
 #define MM 128
 #define NN 128
@@ -176,6 +179,8 @@ void configure_smem(const void * func, const size_t smem) {
         func,
         cudaFuncAttributeMaxDynamicSharedMemorySize,
         smem));
+
+    printf("SMEM: %zu\n", smem);
 }
 
 __global__ void test_pipe_gemm_kernel(half * x, half * w, half * out) {
@@ -201,10 +206,10 @@ void test_pipe_gemm() {
     using SmemBuffers = Types::SmemBuffers;
 
     printf("==== test_pipe_gemm ====\n");
-    Tensor x(128, 128);
-    Tensor w(128, 128);
-    Tensor out(128, 128);
-    Tensor ref(128, 128);
+    Tensor x(MM, KK);
+    Tensor w(KK, NN);
+    Tensor out(MM, NN);
+    Tensor ref(MM, NN);
 
     x.rand_fill();
     w.rand_fill();
@@ -222,7 +227,7 @@ void test_pipe_gemm() {
     });
 
     cuda_time_kernel_ms([&] () {
-        dim3 block(32, 32);
+        dim3 block(MM / 4, NN / 4);
         dim3 grid(4, 4);
         ref_gemm<<<grid, block>>>(x.dev_ptr, w.dev_ptr, ref.dev_ptr);
     });
@@ -257,11 +262,11 @@ void test_pipe_gemm_bias() {
     using SmemBuffers = Types::SmemBuffers;
 
     printf("==== test_pipe_gemm_bias ====\n");
-    Tensor x(128, 128);
-    Tensor w(128, 128);
-    Tensor b(1, 128);
-    Tensor out(128, 128);
-    Tensor ref(128, 128);
+    Tensor x(MM, KK);
+    Tensor w(KK, NN);
+    Tensor b(1, NN);
+    Tensor out(MM, NN);
+    Tensor ref(MM, NN);
 
     x.rand_fill();
     w.rand_fill();
@@ -281,7 +286,7 @@ void test_pipe_gemm_bias() {
     });
 
     cuda_time_kernel_ms([&] () {
-        dim3 block(32, 32);
+        dim3 block(MM / 4, NN / 4);
         dim3 grid(4, 4);
         ref_gemm_bias<<<grid, block>>>(
             x.dev_ptr, w.dev_ptr, b.dev_ptr, ref.dev_ptr);
@@ -317,11 +322,11 @@ void test_pipe_gemm_bias_relu() {
     using SmemBuffers = Types::SmemBuffers;
 
     printf("==== test_pipe_gemm_bias_relu ====\n");
-    Tensor x(128, 128);
-    Tensor w(128, 128);
-    Tensor b(1, 128);
-    Tensor out(128, 128);
-    Tensor ref(128, 128);
+    Tensor x(MM, KK);
+    Tensor w(KK, NN);
+    Tensor b(1, NN);
+    Tensor out(MM, NN);
+    Tensor ref(MM, NN);
 
     x.rand_fill();
     w.rand_fill();
@@ -341,7 +346,7 @@ void test_pipe_gemm_bias_relu() {
     });
 
     cuda_time_kernel_ms([&] () {
-        dim3 block(32, 32);
+        dim3 block(MM / 4, NN / 4);
         dim3 grid(4, 4);
         ref_gemm_bias_relu<<<grid, block>>>(
             x.dev_ptr, w.dev_ptr, b.dev_ptr, ref.dev_ptr);
@@ -354,10 +359,101 @@ void test_pipe_gemm_bias_relu() {
     printf("\n");
 }
 
+__global__ void test_pipe_gemm_bias_layer_norm_kernel(
+    half * x,
+    half * w,
+    half * b,
+    half * gamma,
+    half * beta,
+    half * out
+) {
+    using Input = MemoryReader;
+    using Accum = NullReader;
+    using Output = MemoryWriter;
+
+    Input ir(x, 0);
+    Accum ar;
+    Output ow(out, 0);
+
+    pipe_gemm_bias_layer_norm<
+        cutlass::gemm::GemmShape<MM, NN, KK>,
+        Input,
+        Accum,
+        Output
+    >(w, b, gamma, beta, ir, ar, ow, 1);
+}
+
+
+void test_pipe_gemm_bias_layer_norm() {
+    using Types = PipeGemmBiasLayerNorm<cutlass::gemm::GemmShape<MM, NN, KK>>;
+    using SmemBuffers = Types::SmemBuffers;
+
+    printf("==== test_pipe_gemm_bias_layer_norm ====\n");
+    Tensor x(MM, KK);
+    Tensor w(KK, NN);
+    Tensor b(1, NN);
+    Tensor gamma(1, NN);
+    Tensor beta(1, NN);
+    Tensor out(MM, NN);
+    Tensor temp(MM, NN);
+    Tensor ref(MM, NN);
+
+    x.rand_fill();
+    w.rand_fill();
+    b.fill(1.0f);
+    gamma.fill(1.0f);
+    beta.fill(0.0f);
+
+    x.to_dev();
+    w.to_dev();
+    b.to_dev();
+    gamma.to_dev();
+    beta.to_dev();
+
+    dim3 block(32, Types::num_warps);
+    const size_t smem = sizeof(SmemBuffers);
+    configure_smem((const void *)test_pipe_gemm_bias_layer_norm_kernel, smem);
+
+    printf("==== Running Kernel ====\n");
+    cuda_time_kernel_ms([&] () {
+        printf("Block: %d, %d\n", block.x, block.y);
+        test_pipe_gemm_bias_layer_norm_kernel<<<1, block, smem>>>(
+            x.dev_ptr,
+            w.dev_ptr,
+            b.dev_ptr,
+            gamma.dev_ptr,
+            beta.dev_ptr,
+            out.dev_ptr);
+    });
+
+    printf("==== Running Reference ====\n");
+    cuda_time_kernel_ms([&] () {
+        dim3 block(MM / 4, NN / 4);
+        dim3 grid(4, 4);
+        ref_gemm_bias<<<grid, block>>>(
+            x.dev_ptr, w.dev_ptr, b.dev_ptr, ref.dev_ptr);
+    });
+
+    cuda_time_kernel_ms([&] () {
+        dim3 block(32, 4);
+        dim3 grid(1);
+        device_layer_norm<MM, NN><<<grid, block>>>(
+            ref.dev_ptr, gamma.dev_ptr, beta.dev_ptr, ref.dev_ptr, MM
+        );
+    });
+
+    out.to_host();
+    ref.to_host();
+    compare(ref, out);
+    printf("L2 error: %.6f\n", l2(ref, out));
+    printf("\n");
+}
+
 int main(){
-    srand(time(0));
-    test_pipe_gemm();
-    test_pipe_gemm_bias();
-    test_pipe_gemm_bias_relu();
+    srand(0);
+    // test_pipe_gemm();
+    // test_pipe_gemm_bias();
+    // test_pipe_gemm_bias_relu();
+    test_pipe_gemm_bias_layer_norm();
     return 0;
 }
