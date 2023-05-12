@@ -20,7 +20,7 @@ struct QueueSlot {
 
     Item data;
 
-    __device__ QueueSlot() : read_done({0}), write_done({0}), data() {}
+    __device__ QueueSlot() : read_done{0}, write_done{0}, data() {}
     __device__ void reset(int seq_i) {
         seq_n[0] = seq_i;
         read_done[0] = 0;
