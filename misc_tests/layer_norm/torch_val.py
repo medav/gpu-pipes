@@ -45,8 +45,9 @@ def test_layer_norm_128():
     #         print(i, y_ref[i] - y_act[i])
 
 
-def bench_torch_ln(NI=1000):
-    x = torch.randn(128*1024, 128, dtype=torch.float16, device='cuda')
+def bench_torch_ln(NI=10000):
+    NR = 128 * 1024
+    x = torch.randn(NR, 128, dtype=torch.float16, device='cuda')
 
     gamma = torch.ones(128, dtype=torch.float16, device='cuda')
     beta = torch.zeros(128, dtype=torch.float16, device='cuda')
@@ -60,11 +61,12 @@ def bench_torch_ln(NI=1000):
     t1 = time.perf_counter()
 
     tt = t1 - t0
-    print(f'Torch layer norm: {NI * 128 / tt} rows/sec ({1e3 * tt / NI:.3f} ms/iter)')
+    print(f'Torch layer norm: {NI * NR / tt / 1e6} M rows/sec ({1e3 * tt / NI:.3f} ms/iter)')
 
 
-def bench_custom_ln(NI=1000):
-    x = torch.randn(128*1024, 128, dtype=torch.float16, device='cuda')
+def bench_custom_ln(NI=10000):
+    NR = 128 * 1024
+    x = torch.randn(NR, 128, dtype=torch.float16, device='cuda')
 
     gamma = torch.ones(128, dtype=torch.float16, device='cuda')
     beta = torch.zeros(128, dtype=torch.float16, device='cuda')
@@ -77,12 +79,26 @@ def bench_custom_ln(NI=1000):
     t1 = time.perf_counter()
 
     tt = t1 - t0
-    print(f'Custom layer norm: {NI * 128 / tt} rows/sec ({1e3 * tt / NI:.3f} ms/iter)')
+    print(f'Custom layer norm: {NI * NR / tt / 1e6} M rows/sec ({1e3 * tt / NI:.3f} ms/iter)')
 
+def bench_custom_ln_tb():
+    mblk = 128
+    gamma = torch.ones(128, dtype=torch.float16, device='cuda')
+    beta = torch.zeros(128, dtype=torch.float16, device='cuda')
+
+    print(' # TB              Throughput')
+    print('-----       -----------------')
+
+    for num_blocks in [108, 216, 432, 864, 1728, 3456, 6912, 13824, 27648, 55296]:
+        x = torch.randn(num_blocks * mblk, 128, dtype=torch.float16, device='cuda')
+        time_ms = layer_norm_cuda.bench_layer_norm_128(
+            x, gamma, beta, mblk, 2, 1000) / 1000
+
+        print(f'{num_blocks:5d} {num_blocks * mblk / time_ms * 1e3 / 1e6:12.0f} M rows/sec')
 
 if __name__ == '__main__':
-    test_layer_norm_128()
-    bench_torch_ln()
-    bench_custom_ln()
-
+    # test_layer_norm_128()
+    # bench_torch_ln()
+    # bench_custom_ln()
+    bench_custom_ln_tb()
 
