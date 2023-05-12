@@ -3,3 +3,4 @@ test_2sm_gemm_pipe
 .vscode
 test_mgn_node_pipe
 *.elf
+__pycache__
