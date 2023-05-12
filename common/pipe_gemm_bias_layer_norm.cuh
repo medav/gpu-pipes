@@ -139,87 +139,93 @@ __device__ void pipe_gemm_bias_layer_norm(
     wait_all();
 
     for (size_t i = 0; i < num_iters; i++) {
-        half * i_ptr = ir.read_acquire();
+        half * o_ptr = nullptr;
+        if (warp_id < Types::num_warps) {
+            half * i_ptr = ir.read_acquire();
 
-        typename Types::Mma::IteratorA iterator_A(
-            {{ProblemShape::kK}},
-            (cutlass::half_t *)i_ptr,
-            {ProblemShape::kM, ProblemShape::kK},
-            tb_thread_id,
-            tb_offset_A);
+            typename Types::Mma::IteratorA iterator_A(
+                {{ProblemShape::kK}},
+                (cutlass::half_t *)i_ptr,
+                {ProblemShape::kM, ProblemShape::kK},
+                tb_thread_id,
+                tb_offset_A);
 
-        typename Types::Mma::IteratorB iterator_B(
-            {{ProblemShape::kN}},
-            (cutlass::half_t *)weight,
-            {ProblemShape::kK, ProblemShape::kN},
-            tb_thread_id,
-            tb_offset_B);
+            typename Types::Mma::IteratorB iterator_B(
+                {{ProblemShape::kN}},
+                (cutlass::half_t *)weight,
+                {ProblemShape::kK, ProblemShape::kN},
+                tb_thread_id,
+                tb_offset_B);
 
-        typename Types::Mma gemm_op(
-            smem->mma_storage, tb_thread_id, warp_id, threadIdx.x);
+            typename Types::Mma gemm_op(
+                smem->mma_storage, tb_thread_id, warp_id, threadIdx.x);
 
-        half * acc_ptr = ar.read_acquire();
+            half * acc_ptr = ar.read_acquire();
 
-        if (acc_ptr == nullptr) {
-            accum.clear();
-        }
-        else {
-            typename Types::Mma::Operator::IteratorC iterator_Acc(
-                {(typename Types::Mma::ElementC *)acc_ptr, (int)ProblemShape::kN},
+            if (acc_ptr == nullptr) {
+                accum.clear();
+            }
+            else {
+                typename Types::Mma::Operator::IteratorC iterator_Acc(
+                    {(typename Types::Mma::ElementC *)acc_ptr, (int)ProblemShape::kN},
+                    lane_id);
+
+                iterator_Acc.add_tile_offset({
+                    (warp_idx_mn % Types::Mma::WarpCount::kM),
+                    (warp_idx_mn / Types::Mma::WarpCount::kM)
+                });
+
+                iterator_Acc.load(accum);
+            }
+
+            ar.read_release();
+
+            gemm_op(
+                CLD(ProblemShape::kK, Types::Mma::Shape::kK),
+                accum,
+                iterator_A,
+                iterator_B,
+                accum);
+
+            ir.read_release();
+
+            typename Types::Epilogue epilogue(
+                smem->epilogue_storage,
+                tb_thread_id,
+                warp_id,
                 lane_id);
 
-            iterator_Acc.add_tile_offset({
-                (warp_idx_mn % Types::Mma::WarpCount::kM),
-                (warp_idx_mn / Types::Mma::WarpCount::kM)
-            });
+            __syncthreads();
 
-            iterator_Acc.load(accum);
+            o_ptr = ow.write_acquire();
+
+            typename Types::Epilogue::OutputTileIterator iterator_C(
+                typename Types::Epilogue::OutputTileIterator::Params({ProblemShape::kN}),
+                (cutlass::half_t *)o_ptr,
+                {ProblemShape::kM, ProblemShape::kN},
+                tb_thread_id
+            );
+
+            typename Types::Epilogue::OutputTileIterator iterator_Bias(
+                typename Types::Epilogue::OutputTileIterator::Params({0}),
+                (cutlass::half_t *)bias,
+                {ProblemShape::kM, ProblemShape::kN},
+                tb_thread_id
+            );
+
+            typename Types::Epilogue::OutputOp output_op(
+                typename Types::Epilogue::OutputOp::Params(
+                    (cutlass::half_t)1.0f,
+                    (cutlass::half_t)0.0f
+                )
+            );
+
+            epilogue(output_op, iterator_C, accum, iterator_Bias);
+            __syncthreads();
         }
-
-        ar.read_release();
-
-        gemm_op(
-            CLD(ProblemShape::kK, Types::Mma::Shape::kK),
-            accum,
-            iterator_A,
-            iterator_B,
-            accum);
-
-        ir.read_release();
-
-        typename Types::Epilogue epilogue(
-            smem->epilogue_storage,
-            tb_thread_id,
-            warp_id,
-            lane_id);
-
-        __syncthreads();
-
-        half * o_ptr = ow.write_acquire();
-
-        typename Types::Epilogue::OutputTileIterator iterator_C(
-            typename Types::Epilogue::OutputTileIterator::Params({ProblemShape::kN}),
-            (cutlass::half_t *)o_ptr,
-            {ProblemShape::kM, ProblemShape::kN},
-            tb_thread_id
-        );
-
-        typename Types::Epilogue::OutputTileIterator iterator_Bias(
-            typename Types::Epilogue::OutputTileIterator::Params({0}),
-            (cutlass::half_t *)bias,
-            {ProblemShape::kM, ProblemShape::kN},
-            tb_thread_id
-        );
-
-        typename Types::Epilogue::OutputOp output_op(
-            typename Types::Epilogue::OutputOp::Params(
-                (cutlass::half_t)1.0f,
-                (cutlass::half_t)0.0f
-            )
-        );
-
-        epilogue(output_op, iterator_C, accum, iterator_Bias);
-        __syncthreads();
+        else {
+            o_ptr = ow.write_acquire();
+        }
 
         //
         // Layer Norm
