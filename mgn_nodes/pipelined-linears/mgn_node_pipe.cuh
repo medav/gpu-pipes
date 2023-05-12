@@ -22,7 +22,9 @@ struct QueueEntry2D {
 };
 
 struct MgnNodeMlp {
-    static const size_t ni = 1000;
+    static const size_t no = 1000;
+    static const size_t ni = 1;
+
     static const size_t mo = 40;
     static const size_t mi = 32 * 1024;
     static const size_t m = mo * mi;
@@ -41,7 +43,7 @@ struct MgnNodeMlp {
 
     half out[m][d];
 
-    static const size_t mblk = 64;
+    static const size_t mblk = 128;
     static const size_t s1_qlen  = 2;
     static const size_t s12_qlen = 2;
     static const size_t s23_qlen = 2;

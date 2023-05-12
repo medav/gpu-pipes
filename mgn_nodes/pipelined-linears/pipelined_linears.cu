@@ -235,7 +235,9 @@ int main() {
     printf("Running...\n");
     float time_ms = cuda_time_kernel_ms(
         [&]() {
-            kernel<<<grid, block, max_smem>>>(prob);
+            for (size_t i = 0; i < MgnNodeMlp::no; i++) {
+                kernel<<<grid, block, max_smem>>>(prob);
+            }
         }
     );
 
@@ -246,7 +248,7 @@ int main() {
         2.0f * MgnNodeMlp::m * (3 * MgnNodeMlp::d) * MgnNodeMlp::d +
         2.0f * MgnNodeMlp::m * MgnNodeMlp::d * MgnNodeMlp::d +
         2.0f * MgnNodeMlp::m * MgnNodeMlp::d * MgnNodeMlp::d;
-    float gflops_v1 = MgnNodeMlp::ni * flops_v1 / (time_ms * 1e6);
+    float gflops_v1 = MgnNodeMlp::no * MgnNodeMlp::ni * flops_v1 / (time_ms * 1e6);
     printf("+ GFLOPS: %f\n", gflops_v1);
 
     return 0;
