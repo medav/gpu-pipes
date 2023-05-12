@@ -1,3 +1,3 @@
 
-APP=pipelined_withgemm
+APP=pipelined_linears
 include ../../common/app.mk
