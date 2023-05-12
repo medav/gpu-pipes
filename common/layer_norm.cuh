@@ -144,19 +144,21 @@ __device__ void layer_norm(
         M);
 }
 
-template<int MBLK, int D>
+template<int D>
 __global__ void device_layer_norm(
     half * in,
     half * gamma,
     half * beta,
     half * out,
-    const int M
+    const int MBLK
 ) {
     half * in_ptr = &in[blockIdx.x * MBLK * D];
     half * out_ptr = &out[blockIdx.x * MBLK * D];
 
     layer_norm<D>(in_ptr, gamma, beta, out_ptr, MBLK);
 }
+
+
 
 #undef WARP_REDUCE
 #undef FULL_MASK
