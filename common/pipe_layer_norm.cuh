@@ -54,19 +54,19 @@ __device__ void pipe_layer_norm(
     wait_all();
 
     for (size_t i = 0; i < num_iters; i++) {
-        half * in = ir.read_acquire();
-        half * out = ow.write_acquire();
+        TensorView it = ir.read_acquire();
+        TensorView ot = ow.write_acquire();
 
 
         memcpy_async_1r_v3<Shape::kD * sizeof(half)>(
-            &in_shared[0][0], &in[0], thread, num_threads);
+            &in_shared[0][0], &it.data[0], thread, num_threads);
         commit_group();
 
         for (int m = 0; m < Shape::kM; m++) {
             if (m < Shape::kM - 1) {
                 memcpy_async_1r_v3<Shape::kD * sizeof(half)>(
                     &in_shared[(m + 1) % 2][0],
-                    &in[(m + 1) * Shape::kD],
+                    &it.data[(m + 1) * Shape::kD],
                     thread,
                     num_threads);
                 commit_group();
@@ -117,8 +117,8 @@ __device__ void pipe_layer_norm(
             for (int d = thread; d < Shape::kD; d += num_threads) {
                 float x = __half2float(in_ptr[d]);
                 float norm = (x - mean) / sqrt_var;
-                float y = norm * __half2float(weight[d]) + __half2float(bias[d]);
-                out[row_off + d] = __float2half(y);
+                float y = norm * __half2float(s_weight[d]) + __half2float(s_bias[d]);
+                ot.data[row_off + d] = __float2half(y);
             }
         }
 

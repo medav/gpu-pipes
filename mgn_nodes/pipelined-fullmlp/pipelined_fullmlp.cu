@@ -29,9 +29,7 @@ __device__ void mlp0_sm0(MgnNodeMlp *prob, size_t row) {
     const size_t mblk = MgnNodeMlp::mblk;
     const size_t num_iters = prob->mi / MgnNodeMlp::mblk;
 
-    if (threadIdx.y >= PipeGemm<ProblemShape>::num_warps) return;
-
-    Input input(&prob->in[0][row * prob->mi][0], mblk * prob->d);
+    Input input(&prob->in[row * prob->mi][0], mblk * prob->d, MgnNodeMlp::d * 3);
     Accum accum;
     Output output(prob->qs.q01[row]);
 
@@ -42,7 +40,7 @@ __device__ void mlp0_sm0(MgnNodeMlp *prob, size_t row) {
             Input,
             Accum,
             Output
-        >(&prob->w1[0][0][0], input, accum, output, num_iters);
+        >({&prob->w1[0][0], MgnNodeMlp::d * 3}, input, accum, output, num_iters);
     }
 }
 
@@ -54,9 +52,7 @@ __device__ void mlp0_sm1(MgnNodeMlp *prob, size_t row) {
     const size_t mblk = MgnNodeMlp::mblk;
     const size_t num_iters = prob->mi / MgnNodeMlp::mblk;
 
-    if (threadIdx.y >= PipeGemm<ProblemShape>::num_warps) return;
-
-    Input input(&prob->in[1][row * prob->mi][0], mblk * prob->d);
+    Input input(&prob->in[row * prob->mi][MgnNodeMlp::d], mblk * prob->d, MgnNodeMlp::d * 3);
     Accum accum(prob->qs.q01[row]);
     Output output(prob->qs.q12[row]);
 
@@ -67,7 +63,7 @@ __device__ void mlp0_sm1(MgnNodeMlp *prob, size_t row) {
             Input,
             Accum,
             Output
-        >(&prob->w1[1][0][0], input, accum, output, num_iters);
+        >({&prob->w1[0][MgnNodeMlp::d], MgnNodeMlp::d * 3}, input, accum, output, num_iters);
     }
 }
 
@@ -79,9 +75,7 @@ __device__ void mlp0_sm2(MgnNodeMlp *prob, size_t row) {
     const size_t mblk = MgnNodeMlp::mblk;
     const size_t num_iters = prob->mi / MgnNodeMlp::mblk;
 
-    if (threadIdx.y >= PipeGemmBiasRelu<ProblemShape>::num_warps) return;
-
-    Input input(&prob->in[2][row * prob->mi][0], mblk * prob->d);
+    Input input(&prob->in[row * prob->mi][MgnNodeMlp::d * 2], mblk * prob->d, MgnNodeMlp::d * 3);
     Accum accum(prob->qs.q12[row]);
     Output output(prob->qs.q23[row]);
 
@@ -93,7 +87,7 @@ __device__ void mlp0_sm2(MgnNodeMlp *prob, size_t row) {
             Input,
             Accum,
             Output
-        >(&prob->w1[2][0][0], &prob->b1[0], input, accum, output, num_iters);
+        >({&prob->w1[0][MgnNodeMlp::d * 2], MgnNodeMlp::d * 3}, {&prob->b1[0], 0}, input, accum, output, num_iters);
     }
 }
 
@@ -105,8 +99,6 @@ __device__ void mlp1_sm0(MgnNodeMlp *prob, size_t row) {
     const size_t mblk = MgnNodeMlp::mblk;
     const size_t num_iters = prob->mi / MgnNodeMlp::mblk;
 
-    if (threadIdx.y >= PipeGemmBiasRelu<ProblemShape>::num_warps) return;
-
     Input input(prob->qs.q23[row]);
     Accum accum;
     Output output(prob->qs.q34[row]);
@@ -117,7 +109,7 @@ __device__ void mlp1_sm0(MgnNodeMlp *prob, size_t row) {
             Input,
             Accum,
             Output
-        >(&prob->w2[0][0], &prob->b2[0], input, accum, output, num_iters);
+        >({&prob->w2[0][0], MgnNodeMlp::d}, {&prob->b2[0], 0}, input, accum, output, num_iters);
     }
 }
 
@@ -129,25 +121,25 @@ __device__ void mlp2_sm0(MgnNodeMlp *prob, size_t row) {
     const size_t mblk = MgnNodeMlp::mblk;
     const size_t num_iters = prob->mi / MgnNodeMlp::mblk;
 
-    if (threadIdx.y >= PipeGemmBias<ProblemShape>::num_warps) return;
-
     Input input(prob->qs.q34[row]);
     Accum accum;
     Output output(prob->qs.lnq[row]);
 
+
     for (size_t i = 0; i < MgnNodeMlp::ni; i++) {
+        output.reset();
         pipe_gemm_bias<
             cutlass::gemm::GemmShape<mblk, 128, 128>,
             Input,
             Accum,
             Output
-        >(&prob->w3[0][0], &prob->b3[0], input, accum, output, num_iters);
+        >({&prob->w3[0][0], MgnNodeMlp::d}, {&prob->b3[0], 0}, input, accum, output, num_iters);
     }
 }
 
 __device__ void ln_sm(MgnNodeMlp *prob, size_t row, int seq_off, int num_lns) {
     using Input = SplitQueueReader<MgnNodeMlp::LayerNormQueue>;
-    using Output = MergeMemoryWriter;
+    using Output = MemoryWriter;
 
     const size_t mblk = MgnNodeMlp::mblk;
     const size_t num_iters = prob->mi / MgnNodeMlp::mblk / num_lns;
@@ -155,14 +147,14 @@ __device__ void ln_sm(MgnNodeMlp *prob, size_t row, int seq_off, int num_lns) {
     Input input(prob->qs.lnq[row], seq_off, num_lns);
 
     Output output(
-        &prob->out[0][0],
+        &prob->out[mblk * seq_off][0],
         mblk * num_lns * MgnNodeMlp::d,
-        mblk * seq_off * MgnNodeMlp::d);
+        MgnNodeMlp::d);
 
     for (size_t i = 0; i < MgnNodeMlp::ni; i++) {
         output.reset();
         pipe_layer_norm<LayerNormShape<mblk, 128>, Input, Output>(
-            &prob->gamma[0], &prob->beta[0], input, output, num_iters);
+            {&prob->gamma[0], 0}, {&prob->beta[0], 0}, input, output, num_iters);
     }
 
 }
