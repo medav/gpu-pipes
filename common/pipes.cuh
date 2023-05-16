@@ -7,18 +7,19 @@
 struct MemoryReader {
     half * const base;
     const size_t stride;
+    const size_t tile_stride;
     size_t offset;
 
-    __device__ MemoryReader(half * const base, size_t stride) :
-        base(base), stride(stride), offset(0) {}
+    __device__ MemoryReader(half * const base, size_t stride, size_t tile_stride) :
+        base(base), stride(stride), tile_stride(tile_stride), offset(0) {}
 
-    __device__ half* read_acquire() { return base + offset; }
+    __device__ TensorView read_acquire() { return {base + offset, (int)tile_stride}; }
     __device__ void read_release() { offset += stride; }
     __device__ void reset() { offset = 0; }
 };
 
 struct NullReader {
-    __device__ half* read_acquire() { return nullptr; }
+    __device__ TensorView read_acquire() { return {nullptr, 0}; }
     __device__ void read_release() {}
     __device__ void reset() {}
 };
@@ -30,7 +31,7 @@ struct QueueReader {
     size_t seq_n;
 
     __device__ QueueReader(Queue& q) : q(q), seq_n(0) { }
-    __device__ half* read_acquire() { return q.read_wait(seq_n).as_ptr(); }
+    __device__ TensorView read_acquire() { return q.read_wait(seq_n).as_view(); }
     __device__ void read_release() { q.read_commit(seq_n); seq_n++; }
     __device__ void reset() { seq_n = 0; }
 };
@@ -45,7 +46,7 @@ struct SplitQueueReader {
 
     __device__ SplitQueueReader(Queue& q, size_t _seq_off, size_t _seq_stride) :
         q(q), seq_n(_seq_off), seq_off(_seq_off), seq_stride(_seq_stride) { }
-    __device__ half* read_acquire() { return q.read_wait(seq_n).as_ptr(); }
+    __device__ TensorView read_acquire() { return q.read_wait(seq_n).as_view(); }
     __device__ void read_release() { q.read_commit(seq_n); seq_n += seq_stride; }
     __device__ void reset() { seq_n = seq_off; }
 };
@@ -53,26 +54,13 @@ struct SplitQueueReader {
 struct MemoryWriter {
     half * base;
     const size_t stride;
+    const size_t tile_stride;
     size_t offset;
 
-    __device__ MemoryWriter(half * base, size_t stride) :
-        base(base), stride(stride), offset(0) {}
+    __device__ MemoryWriter(half * base, size_t stride, size_t tile_stride) :
+        base(base), stride(stride), tile_stride(tile_stride), offset(0) {}
 
-    __device__ half* write_acquire() { return base + offset; }
-    __device__ void write_release() { offset += stride; }
-    __device__ void reset() { offset = 0; }
-};
-
-struct MergeMemoryWriter {
-    half * base;
-    const size_t stride;
-    size_t offset;
-    const size_t merge_offset;
-
-    __device__ MergeMemoryWriter(half * base, size_t stride, size_t _merge_offset) :
-        base(base), stride(stride), offset(0), merge_offset(_merge_offset) {}
-
-    __device__ half* write_acquire() { return base + offset + merge_offset; }
+    __device__ TensorView write_acquire() { return {base + offset, (int)tile_stride}; }
     __device__ void write_release() { offset += stride; }
     __device__ void reset() { offset = 0; }
 };
@@ -84,13 +72,13 @@ struct QueueWriter {
     size_t seq_n;
 
     __device__ QueueWriter(Queue& q) : q(q), seq_n(0) { q.reset(); }
-    __device__ half* write_acquire() { return q.write_wait(seq_n).as_ptr(); }
+    __device__ TensorView write_acquire() { return q.write_wait(seq_n).as_view(); }
     __device__ void write_release() { q.write_commit(seq_n++); }
     __device__ void reset() { seq_n = 0; q.reset(); }
 };
 
 struct NullWriter {
-    __device__ half* write_acquire() { return nullptr; }
+    __device__ TensorView write_acquire() { return {nullptr, 0}; }
     __device__ void write_release() {}
     __device__ void reset() {}
 };

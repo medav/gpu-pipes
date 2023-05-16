@@ -119,11 +119,11 @@ __device__ void pipe_gemm_bias(
     typename Types::Mma::FragmentC accum;
 
     for (size_t i = 0; i < num_iters; i++) {
-        half * i_ptr = ir.read_acquire();
+        TensorView it = ir.read_acquire();
 
         typename Types::Mma::IteratorA iterator_A(
-            {{ProblemShape::kK}},
-            (cutlass::half_t *)i_ptr,
+            {{it.stride}},
+            (cutlass::half_t *)it.data,
             {ProblemShape::kM, ProblemShape::kK},
             tb_thread_id,
             tb_offset_A);
@@ -138,14 +138,14 @@ __device__ void pipe_gemm_bias(
         typename Types::Mma gemm_op(
             smem->mma_storage, tb_thread_id, warp_id, threadIdx.x);
 
-        half * acc_ptr = ar.read_acquire();
+        TensorView at = ar.read_acquire();
 
-        if (acc_ptr == nullptr) {
+        if (at.data == nullptr) {
             accum.clear();
         }
         else {
             typename Types::Mma::Operator::IteratorC iterator_Acc(
-                {(typename Types::Mma::ElementC *)acc_ptr, (int)ProblemShape::kN},
+                {(typename Types::Mma::ElementC *)at.data, (int)at.stride},
                 lane_id);
 
             iterator_Acc.add_tile_offset({
@@ -173,15 +173,14 @@ __device__ void pipe_gemm_bias(
             warp_id,
             lane_id);
 
-        half * o_ptr = ow.write_acquire();
+        TensorView ot = ow.write_acquire();
 
         typename Types::Epilogue::OutputTileIterator iterator_C(
-            typename Types::Epilogue::OutputTileIterator::Params({ProblemShape::kN}),
-            (cutlass::half_t *)o_ptr,
+            typename Types::Epilogue::OutputTileIterator::Params({ot.stride}),
+            (cutlass::half_t *)ot.data,
             {ProblemShape::kM, ProblemShape::kN},
             tb_thread_id
         );
-
 
         typename Types::Epilogue::OutputTileIterator iterator_Bias(
             typename Types::Epilogue::OutputTileIterator::Params({bias.stride}),

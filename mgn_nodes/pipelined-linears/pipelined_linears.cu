@@ -20,7 +20,7 @@ const size_t max_warps = std::max({
     PipeGemmBiasRelu<ProblemShape>::num_warps
 });
 
-__device__ void mlp0_sm0(void * smem, MgnNodeMlp *prob, size_t row) {
+__device__ void mlp0_sm0(MgnNodeMlp *prob, size_t row) {
     using Input = MemoryReader;
     using Accum = NullReader;
     using Output = QueueWriter<MgnNodeMlp::Stage1Queue>;
@@ -28,7 +28,7 @@ __device__ void mlp0_sm0(void * smem, MgnNodeMlp *prob, size_t row) {
     const size_t mblk = MgnNodeMlp::mblk;
     const size_t num_iters = prob->mi / MgnNodeMlp::mblk;
 
-    Input input(&prob->in[0][row * prob->mi][0], mblk * prob->d);
+    Input input(&prob->in[row * prob->mi][0], mblk * prob->d, MgnNodeMlp::d * 3);
     Accum accum;
     Output output(prob->qs.q1_01[row]);
 
@@ -39,11 +39,11 @@ __device__ void mlp0_sm0(void * smem, MgnNodeMlp *prob, size_t row) {
             Input,
             Accum,
             Output
-        >(&prob->w1[0][0][0], input, accum, output, num_iters);
+        >({&prob->w1[0][0], MgnNodeMlp::d * 3}, input, accum, output, num_iters);
     }
 }
 
-__device__ void mlp0_sm1(void * smem, MgnNodeMlp *prob, size_t row) {
+__device__ void mlp0_sm1(MgnNodeMlp *prob, size_t row) {
     using Input = MemoryReader;
     using Accum = QueueReader<MgnNodeMlp::Stage1Queue>;
     using Output = QueueWriter<MgnNodeMlp::Stage1Queue>;
@@ -51,7 +51,7 @@ __device__ void mlp0_sm1(void * smem, MgnNodeMlp *prob, size_t row) {
     const size_t mblk = MgnNodeMlp::mblk;
     const size_t num_iters = prob->mi / MgnNodeMlp::mblk;
 
-    Input input(&prob->in[1][row * prob->mi][0], mblk * prob->d);
+    Input input(&prob->in[row * prob->mi][MgnNodeMlp::d], mblk * prob->d, MgnNodeMlp::d * 3);
     Accum accum(prob->qs.q1_01[row]);
     Output output(prob->qs.q1_12[row]);
 
@@ -62,11 +62,11 @@ __device__ void mlp0_sm1(void * smem, MgnNodeMlp *prob, size_t row) {
             Input,
             Accum,
             Output
-        >(&prob->w1[1][0][0], input, accum, output, num_iters);
+        >({&prob->w1[0][MgnNodeMlp::d], MgnNodeMlp::d * 3}, input, accum, output, num_iters);
     }
 }
 
-__device__ void mlp0_sm2(void * smem, MgnNodeMlp *prob, size_t row) {
+__device__ void mlp0_sm2(MgnNodeMlp *prob, size_t row) {
     using Input = MemoryReader;
     using Accum = QueueReader<MgnNodeMlp::Stage1Queue>;
     using Output = QueueWriter<MgnNodeMlp::Stage12Queue>;
@@ -74,7 +74,7 @@ __device__ void mlp0_sm2(void * smem, MgnNodeMlp *prob, size_t row) {
     const size_t mblk = MgnNodeMlp::mblk;
     const size_t num_iters = prob->mi / MgnNodeMlp::mblk;
 
-    Input input(&prob->in[2][row * prob->mi][0], mblk * prob->d);
+    Input input(&prob->in[row * prob->mi][MgnNodeMlp::d * 2], mblk * prob->d, MgnNodeMlp::d * 3);
     Accum accum(prob->qs.q1_12[row]);
     Output output(prob->qs.q12[row]);
 
@@ -86,11 +86,11 @@ __device__ void mlp0_sm2(void * smem, MgnNodeMlp *prob, size_t row) {
             Input,
             Accum,
             Output
-        >(&prob->w1[2][0][0], &prob->b1[0], input, accum, output, num_iters);
+        >({&prob->w1[0][MgnNodeMlp::d * 2], MgnNodeMlp::d * 3}, {&prob->b1[0], 0}, input, accum, output, num_iters);
     }
 }
 
-__device__ void mlp1_sm0(void * smem, MgnNodeMlp *prob, size_t row) {
+__device__ void mlp1_sm0(MgnNodeMlp *prob, size_t row) {
     using Input = QueueReader<MgnNodeMlp::Stage12Queue>;
     using Accum = NullReader;
     using Output = QueueWriter<MgnNodeMlp::Stage23Queue>;
@@ -108,11 +108,11 @@ __device__ void mlp1_sm0(void * smem, MgnNodeMlp *prob, size_t row) {
             Input,
             Accum,
             Output
-        >(&prob->w2[0][0], &prob->b2[0], input, accum, output, num_iters);
+        >({&prob->w2[0][0], MgnNodeMlp::d}, {&prob->b2[0], 0}, input, accum, output, num_iters);
     }
 }
 
-__device__ void mlp2_sm0(void * smem, MgnNodeMlp *prob, size_t row) {
+__device__ void mlp2_sm0(MgnNodeMlp *prob, size_t row) {
     using Input = QueueReader<MgnNodeMlp::Stage23Queue>;
     using Accum = NullReader;
     using Output = MemoryWriter;
@@ -122,7 +122,7 @@ __device__ void mlp2_sm0(void * smem, MgnNodeMlp *prob, size_t row) {
 
     Input input(prob->qs.q23[row]);
     Accum accum;
-    Output output(&prob->out[row * prob->mo][0], mblk * prob->d);
+    Output output(&prob->out[row * prob->mo][0], mblk * prob->d, MgnNodeMlp::d);
 
 
     for (size_t i = 0; i < MgnNodeMlp::ni; i++) {
@@ -132,7 +132,7 @@ __device__ void mlp2_sm0(void * smem, MgnNodeMlp *prob, size_t row) {
             Input,
             Accum,
             Output
-        >(&prob->w3[0][0], &prob->b3[0], input, accum, output, num_iters);
+        >({&prob->w3[0][0], MgnNodeMlp::d}, {&prob->b3[0], 0}, input, accum, output, num_iters);
     }
 }
 
@@ -151,27 +151,15 @@ __device__ void consume_dummy(QT& q, size_t num_iters) {
 
 
 __global__ void kernel(MgnNodeMlp * prob) {
-    void * smem = nullptr;
     size_t pipe_col = blockIdx.x;
     size_t pipe_row = blockIdx.y;
 
     switch (pipe_col) {
-        case 0:
-            mlp0_sm0(smem, prob, pipe_row);
-            break;
-        case 1:
-            mlp0_sm1(smem, prob, pipe_row);
-            break;
-        case 2:
-            mlp0_sm2(smem, prob, pipe_row);
-            break;
-        case 3:
-            mlp1_sm0(smem, prob, pipe_row);
-            break;
-        case 4:
-            mlp2_sm0(smem, prob, pipe_row);
-            break;
-
+        case 0: mlp0_sm0(prob, pipe_row); break;
+        case 1: mlp0_sm1(prob, pipe_row); break;
+        case 2: mlp0_sm2(prob, pipe_row); break;
+        case 3: mlp1_sm0(prob, pipe_row); break;
+        case 4: mlp2_sm0(prob, pipe_row); break;
         default: return;
     }
 }
