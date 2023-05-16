@@ -21,6 +21,7 @@
 #include "cutlass/gemm/device/gemm_universal_adapter.h"
 #include "cutlass/gemm/kernel/default_gemm_universal.h"
 
+#include "common.cuh"
 #include "utils.cuh"
 #include "layer_norm.cuh"
 
@@ -102,10 +103,10 @@ template<
     typename AccumReader,
     typename OutputWriter>
 __device__ void pipe_gemm_bias_layer_norm(
-    half * weight,
-    half * bias,
-    half * gamma,
-    half * beta,
+    TensorView weight,
+    TensorView bias,
+    TensorView gamma,
+    TensorView beta,
     InputReader& ir,
     AccumReader& ar,
     OutputWriter& ow,
@@ -130,10 +131,10 @@ __device__ void pipe_gemm_bias_layer_norm(
     typename Types::Mma::FragmentC accum;
 
     memcpy_async_1r_v3<ProblemShape::kN * sizeof(half)>(
-        &smem->gamma[0], gamma, tb_thread_id, nthreads);
+        &smem->gamma[0], gamma.data, tb_thread_id, nthreads);
 
     memcpy_async_1r_v3<ProblemShape::kN * sizeof(half)>(
-        &smem->beta[0], beta, tb_thread_id, nthreads);
+        &smem->beta[0], beta.data, tb_thread_id, nthreads);
 
     commit_group();
     wait_all();
@@ -151,8 +152,8 @@ __device__ void pipe_gemm_bias_layer_norm(
                 tb_offset_A);
 
             typename Types::Mma::IteratorB iterator_B(
-                {{ProblemShape::kN}},
-                (cutlass::half_t *)weight,
+                {{weight.stride}},
+                (cutlass::half_t *)weight.data,
                 {ProblemShape::kK, ProblemShape::kN},
                 tb_thread_id,
                 tb_offset_B);
@@ -207,8 +208,8 @@ __device__ void pipe_gemm_bias_layer_norm(
             );
 
             typename Types::Epilogue::OutputTileIterator iterator_Bias(
-                typename Types::Epilogue::OutputTileIterator::Params({0}),
-                (cutlass::half_t *)bias,
+                typename Types::Epilogue::OutputTileIterator::Params({bias.stride}),
+                (cutlass::half_t *)bias.data,
                 {ProblemShape::kM, ProblemShape::kN},
                 tb_thread_id
             );

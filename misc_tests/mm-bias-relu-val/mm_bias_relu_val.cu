@@ -197,7 +197,7 @@ __global__ void test_pipe_gemm_kernel(half * x, half * w, half * out) {
         Input,
         Accum,
         Output
-    >(w, ir, ar, ow, 1);
+    >({w, NN}, ir, ar, ow, 1);
 }
 
 
@@ -253,7 +253,7 @@ __global__ void test_pipe_gemm_bias_kernel(half * x, half * w, half * b, half * 
         Input,
         Accum,
         Output
-    >(w, b, ir, ar, ow, 1);
+    >({w, NN}, {b, 0}, ir, ar, ow, 1);
 }
 
 
@@ -313,7 +313,7 @@ __global__ void test_pipe_gemm_bias_relu_kernel(half * x, half * w, half * b, ha
         Input,
         Accum,
         Output
-    >(w, b, ir, ar, ow, 1);
+    >({w, NN}, {b, 0}, ir, ar, ow, 1);
 }
 
 
@@ -380,7 +380,7 @@ __global__ void test_pipe_gemm_bias_layer_norm_kernel(
         Input,
         Accum,
         Output
-    >(w, b, gamma, beta, ir, ar, ow, 1);
+    >({w, NN}, {b, 0}, {gamma, 0}, {beta, 0}, ir, ar, ow, 1);
 }
 
 
@@ -437,7 +437,7 @@ void test_pipe_gemm_bias_layer_norm() {
     cuda_time_kernel_ms([&] () {
         dim3 block(32, 4);
         dim3 grid(1);
-        device_layer_norm<MM, NN><<<grid, block>>>(
+        device_layer_norm<NN><<<grid, block>>>(
             ref.dev_ptr, gamma.dev_ptr, beta.dev_ptr, ref.dev_ptr, MM
         );
     });
@@ -451,9 +451,9 @@ void test_pipe_gemm_bias_layer_norm() {
 
 int main(){
     srand(0);
-    // test_pipe_gemm();
-    // test_pipe_gemm_bias();
-    // test_pipe_gemm_bias_relu();
+    test_pipe_gemm();
+    test_pipe_gemm_bias();
+    test_pipe_gemm_bias_relu();
     test_pipe_gemm_bias_layer_norm();
     return 0;
 }
