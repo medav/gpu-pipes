@@ -21,6 +21,7 @@
 #include "cutlass/gemm/device/gemm_universal_adapter.h"
 #include "cutlass/gemm/kernel/default_gemm_universal.h"
 
+#include "common.cuh"
 #include "utils.cuh"
 
 template<typename ProblemSize>
@@ -94,7 +95,7 @@ template<
     typename AccumReader,
     typename OutputWriter>
 __device__ void pipe_gemm(
-    half * weight,
+    TensorView weight,
     InputReader& ir,
     AccumReader& ar,
     OutputWriter& ow,
@@ -127,8 +128,8 @@ __device__ void pipe_gemm(
             tb_offset_A);
 
         typename Types::Mma::IteratorB iterator_B(
-            {{ProblemShape::kN}},
-            (cutlass::half_t *)weight,
+            {{weight.stride}},
+            (cutlass::half_t *)weight.data,
             {ProblemShape::kK, ProblemShape::kN},
             tb_thread_id,
             tb_offset_B);
