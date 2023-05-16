@@ -1,6 +1,6 @@
 #pragma once
 #include "mpmcq.cuh"
-
+#include "common.cuh"
 
 #include <cuda_fp16.h>
 
@@ -35,6 +35,21 @@ struct QueueReader {
     __device__ void reset() { seq_n = 0; }
 };
 
+template <typename QT>
+struct SplitQueueReader {
+    using Queue = QT;
+    Queue& q;
+    size_t seq_n;
+    const size_t seq_off;
+    const size_t seq_stride;
+
+    __device__ SplitQueueReader(Queue& q, size_t _seq_off, size_t _seq_stride) :
+        q(q), seq_n(_seq_off), seq_off(_seq_off), seq_stride(_seq_stride) { }
+    __device__ half* read_acquire() { return q.read_wait(seq_n).as_ptr(); }
+    __device__ void read_release() { q.read_commit(seq_n); seq_n += seq_stride; }
+    __device__ void reset() { seq_n = seq_off; }
+};
+
 struct MemoryWriter {
     half * base;
     const size_t stride;
@@ -44,6 +59,20 @@ struct MemoryWriter {
         base(base), stride(stride), offset(0) {}
 
     __device__ half* write_acquire() { return base + offset; }
+    __device__ void write_release() { offset += stride; }
+    __device__ void reset() { offset = 0; }
+};
+
+struct MergeMemoryWriter {
+    half * base;
+    const size_t stride;
+    size_t offset;
+    const size_t merge_offset;
+
+    __device__ MergeMemoryWriter(half * base, size_t stride, size_t _merge_offset) :
+        base(base), stride(stride), offset(0), merge_offset(_merge_offset) {}
+
+    __device__ half* write_acquire() { return base + offset + merge_offset; }
     __device__ void write_release() { offset += stride; }
     __device__ void reset() { offset = 0; }
 };
