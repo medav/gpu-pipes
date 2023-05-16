@@ -1,6 +1,15 @@
 #pragma once
 #include "cpasync.cuh"
 
+#include "common.cuh"
+
+#define FULL_MASK 0xffffffff
+
+#define WARP_REDUCE(val) \
+    for (int offset = 16; offset > 0; offset /= 2) { \
+        val += __shfl_down_sync(FULL_MASK, val, offset); \
+    }
+
 template<int M, int D>
 struct LayerNormShape {
     static constexpr int kM = M;
@@ -12,8 +21,8 @@ template<
     typename InputReader,
     typename OutputWriter>
 __device__ void pipe_layer_norm(
-    half * weight,
-    half * bias,
+    TensorView weight,
+    TensorView bias,
     InputReader& ir,
     OutputWriter& ow,
     size_t num_iters
@@ -29,15 +38,17 @@ __device__ void pipe_layer_norm(
     __shared__ float shared_mean;
     __shared__ float shared_var;
 
-    memcpy_async_1r_v2<128, Shape::kD * sizeof(half)>(
+    memcpy_async_1r_v3<Shape::kD * sizeof(half)>(
         &s_weight[0],
-        weight,
-        thread);
+        weight.data,
+        thread,
+        num_threads);
 
-    memcpy_async_1r_v2<128, Shape::kD * sizeof(half)>(
+    memcpy_async_1r_v3<Shape::kD * sizeof(half)>(
         &s_bias[0],
-        bias,
-        thread);
+        bias.data,
+        thread,
+        num_threads);
 
     commit_group();
     wait_all();
@@ -46,16 +57,18 @@ __device__ void pipe_layer_norm(
         half * in = ir.read_acquire();
         half * out = ow.write_acquire();
 
-        memcpy_async_1r_v2<128, Shape::kD * sizeof(half)>(
-            &in_shared[0][0], &in[0], thread);
+
+        memcpy_async_1r_v3<Shape::kD * sizeof(half)>(
+            &in_shared[0][0], &in[0], thread, num_threads);
         commit_group();
 
         for (int m = 0; m < Shape::kM; m++) {
             if (m < Shape::kM - 1) {
-                memcpy_async_1r_v2<128, Shape::kD * sizeof(half)>(
+                memcpy_async_1r_v3<Shape::kD * sizeof(half)>(
                     &in_shared[(m + 1) % 2][0],
                     &in[(m + 1) * Shape::kD],
-                    thread);
+                    thread,
+                    num_threads);
                 commit_group();
             }
 
