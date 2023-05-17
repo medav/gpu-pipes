@@ -4,7 +4,7 @@
 #include <ATen/ATen.h>
 
 #include <cuda_fp16.h>
-#include "layer_norm.cuh"
+#include "layer_norm_v2.cuh"
 #include "utils.cuh"
 
 #define CHECK_CUDA(x) TORCH_CHECK(x.device().is_cuda(), #x " must be a CUDA tensor")
@@ -22,15 +22,16 @@ at::Tensor layer_norm_128(
     CHECK_INPUT(beta);
 
     const int MBLK = 64;
+    const int NW = 32;
 
     at::Tensor out = at::empty_like(x);
 
     assert(x.size(1) == 128);
 
     dim3 grid(x.size(0) / MBLK);
-    dim3 block(32, 4);
+    dim3 block(32, NW);
 
-    device_layer_norm<128><<<grid, block>>>(
+    device_layer_norm<128, NW><<<grid, block>>>(
         (half *)x.data_ptr<at::Half>(),
         (half *)gamma.data_ptr<at::Half>(),
         (half *)beta.data_ptr<at::Half>(),
@@ -46,7 +47,6 @@ float bench_layer_norm_128(
     at::Tensor gamma,
     at::Tensor beta,
     int MBLK,
-    int NW,
     int ni
 ) {
     CHECK_INPUT(x);
@@ -54,6 +54,7 @@ float bench_layer_norm_128(
     CHECK_INPUT(beta);
 
     at::Tensor out = at::empty_like(x);
+    const int NW = 32;
 
     assert(x.size(1) == 128);
 
@@ -62,7 +63,7 @@ float bench_layer_norm_128(
 
     float time_ms = cuda_time_kernel_ms([&]() {
         for (int i = 0; i < ni; i++) {
-            device_layer_norm<128><<<grid, block>>>(
+            device_layer_norm<128, NW><<<grid, block>>>(
                 (half *)x.data_ptr<at::Half>(),
                 (half *)gamma.data_ptr<at::Half>(),
                 (half *)beta.data_ptr<at::Half>(),

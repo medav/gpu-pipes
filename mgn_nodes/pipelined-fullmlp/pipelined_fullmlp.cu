@@ -18,13 +18,16 @@ const size_t max_smem = std::max({
 const size_t max_warps = std::max({
     PipeGemm<ProblemShape>::num_warps,
     PipeGemmBias<ProblemShape>::num_warps,
-    PipeGemmBiasRelu<ProblemShape>::num_warps
+    PipeGemmBiasRelu<ProblemShape>::num_warps,
+    (size_t)16
 });
 
 __device__ void mlp0_sm0(MgnNodeMlp *prob, size_t row) {
     using Input = MemoryReader;
     using Accum = NullReader;
     using Output = QueueWriter<MgnNodeMlp::Queue>;
+
+    if (threadIdx.y >= PipeGemm<ProblemShape>::num_warps) return;
 
     const size_t mblk = MgnNodeMlp::mblk;
     const size_t num_iters = prob->mi / MgnNodeMlp::mblk;
@@ -49,6 +52,8 @@ __device__ void mlp0_sm1(MgnNodeMlp *prob, size_t row) {
     using Accum = QueueReader<MgnNodeMlp::Queue>;
     using Output = QueueWriter<MgnNodeMlp::Queue>;
 
+    if (threadIdx.y >= PipeGemm<ProblemShape>::num_warps) return;
+
     const size_t mblk = MgnNodeMlp::mblk;
     const size_t num_iters = prob->mi / MgnNodeMlp::mblk;
 
@@ -71,6 +76,8 @@ __device__ void mlp0_sm2(MgnNodeMlp *prob, size_t row) {
     using Input = MemoryReader;
     using Accum = QueueReader<MgnNodeMlp::Queue>;
     using Output = QueueWriter<MgnNodeMlp::Queue>;
+
+    if (threadIdx.y >= PipeGemm<ProblemShape>::num_warps) return;
 
     const size_t mblk = MgnNodeMlp::mblk;
     const size_t num_iters = prob->mi / MgnNodeMlp::mblk;
@@ -96,6 +103,8 @@ __device__ void mlp1_sm0(MgnNodeMlp *prob, size_t row) {
     using Accum = NullReader;
     using Output = QueueWriter<MgnNodeMlp::Queue>;
 
+    if (threadIdx.y >= PipeGemm<ProblemShape>::num_warps) return;
+
     const size_t mblk = MgnNodeMlp::mblk;
     const size_t num_iters = prob->mi / MgnNodeMlp::mblk;
 
@@ -117,6 +126,8 @@ __device__ void mlp2_sm0(MgnNodeMlp *prob, size_t row) {
     using Input = QueueReader<MgnNodeMlp::Queue>;
     using Accum = NullReader;
     using Output = QueueWriter<MgnNodeMlp::LayerNormQueue>;
+
+    if (threadIdx.y >= PipeGemm<ProblemShape>::num_warps) return;
 
     const size_t mblk = MgnNodeMlp::mblk;
     const size_t num_iters = prob->mi / MgnNodeMlp::mblk;
