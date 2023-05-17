@@ -25,13 +25,13 @@ struct QueueEntry2D {
 struct MgnNodeMlp {
     static const size_t no = 1000;
     static const size_t ni = 1;
-    static const size_t mo = 10;
+    static const size_t mo = 20;
     static const size_t mi = 32 * 1024;
     static const size_t m = mo * mi;
     static const size_t d = 128;
 
     static const size_t n_mlp_cols = 5;
-    static const size_t n_ln_cols = 16;
+    static const size_t n_ln_cols = 5;
     static const size_t n_cols = n_mlp_cols + n_ln_cols;
 
 

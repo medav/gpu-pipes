@@ -92,12 +92,12 @@ def bench_custom_ln_tb():
     for num_blocks in [108, 216, 432, 864, 1728, 3456, 6912, 13824, 27648, 55296]:
         x = torch.randn(num_blocks * mblk, 128, dtype=torch.float16, device='cuda')
         time_ms = layer_norm_cuda.bench_layer_norm_128(
-            x, gamma, beta, mblk, 2, 1000) / 1000
+            x, gamma, beta, mblk, 1000) / 1000
 
         print(f'{num_blocks:5d} {num_blocks * mblk / time_ms * 1e3 / 1e6:12.0f} M rows/sec')
 
 if __name__ == '__main__':
-    # test_layer_norm_128()
+    test_layer_norm_128()
     # bench_torch_ln()
     # bench_custom_ln()
     bench_custom_ln_tb()
