@@ -45,3 +45,18 @@ __global__ void half_to_float(float * dst, half * src, size_t N) {
 }
 
 #define CLD(N, D) ((N + D - 1) / D)
+
+void configure_smem(const void * func, const size_t smem) {
+    cudaErrCheck(cudaDeviceSetCacheConfig(cudaFuncCachePreferShared));
+    cudaErrCheck(cudaFuncSetAttribute(
+        func,
+        cudaFuncAttributePreferredSharedMemoryCarveout,
+        cudaSharedmemCarveoutMaxShared));
+
+    cudaErrCheck(cudaFuncSetAttribute(
+        func,
+        cudaFuncAttributeMaxDynamicSharedMemorySize,
+        smem));
+
+    printf("SMEM: %zu\n", smem);
+}

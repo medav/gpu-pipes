@@ -168,20 +168,6 @@ float l2(Tensor& a, Tensor& b) {
     return sqrt(sum_sq);
 }
 
-void configure_smem(const void * func, const size_t smem) {
-    cudaErrCheck(cudaDeviceSetCacheConfig(cudaFuncCachePreferShared));
-    cudaErrCheck(cudaFuncSetAttribute(
-        func,
-        cudaFuncAttributePreferredSharedMemoryCarveout,
-        cudaSharedmemCarveoutMaxShared));
-
-    cudaErrCheck(cudaFuncSetAttribute(
-        func,
-        cudaFuncAttributeMaxDynamicSharedMemorySize,
-        smem));
-
-    printf("SMEM: %zu\n", smem);
-}
 
 __global__ void test_pipe_gemm_kernel(half * x, half * w, half * out) {
     using Input = MemoryReader;
