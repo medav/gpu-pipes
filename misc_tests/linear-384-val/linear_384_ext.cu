@@ -72,8 +72,8 @@ __device__ void linear_128_384_sm0(
     const size_t num_iters = prob->m / mblk;
 
     Input input(
-        &prob->in[mblk * Problem::id + 0],
-        mblk * Problem::id,
+        &prob->in[row * mblk * Problem::id + 0],
+        num_rows * mblk * Problem::id,
         Problem::id);
 
     Accum accum;
@@ -102,8 +102,8 @@ __device__ void linear_128_384_sm1(
     const size_t num_iters = prob->m / mblk;
 
     Input input(
-        &prob->in[mblk * Problem::id],
-        mblk * Problem::id,
+        &prob->in[row * mblk * Problem::id + 128],
+        num_rows * mblk * Problem::id,
         Problem::id);
 
     Accum accum(qs->q1);
@@ -115,7 +115,7 @@ __device__ void linear_128_384_sm1(
         Input,
         Accum,
         Output
-    >({&prob->w[0], Problem::od}, input, accum, output, num_iters);
+    >({&prob->w[128 * Problem::od], Problem::od}, input, accum, output, num_iters);
 }
 
 __device__ void linear_128_384_sm2(
@@ -132,15 +132,15 @@ __device__ void linear_128_384_sm2(
     const size_t num_iters = prob->m / mblk;
 
     Input input(
-        &prob->in[mblk * Problem::id],
-        mblk * Problem::id,
+        &prob->in[row * mblk * Problem::id + 256],
+        num_rows * mblk * Problem::id,
         Problem::id);
 
     Accum accum(qs->q2);
 
     Output output(
-        &prob->out[mblk * Problem::od],
-        mblk * Problem::od,
+        &prob->out[row * mblk * Problem::od],
+        num_rows * mblk * Problem::od,
         Problem::od);
 
     input.reset();
@@ -149,7 +149,7 @@ __device__ void linear_128_384_sm2(
         Input,
         Accum,
         Output
-    >({&prob->w[0], Problem::od}, {&prob->b[0], 0}, input, accum, output, num_iters);
+    >({&prob->w[256 * Problem::od], Problem::od}, {&prob->b[0], 0}, input, accum, output, num_iters);
 }
 
 
@@ -165,7 +165,7 @@ __global__ void linear_128_384_device(
     size_t pipe_row = blockIdx.y;
 
     Problem prob = {
-        .m = 128,
+        .m = m,
         .in = in,
         .w = w,
         .b = b,
@@ -175,9 +175,9 @@ __global__ void linear_128_384_device(
     assert(pipe_row == 0);
 
     switch (pipe_col) {
-        // case 0: linear_128_384_sm0(&prob, qs, pipe_row, blockDim.y); break;
-        // case 1: linear_128_384_sm1(&prob, qs, pipe_row, blockDim.y); break;
-        case 2: linear_128_384_sm2(&prob, qs, pipe_row, blockDim.y); break;
+        case 0: linear_128_384_sm0(&prob, qs, pipe_row, gridDim.y); break;
+        case 1: linear_128_384_sm1(&prob, qs, pipe_row, gridDim.y); break;
+        case 2: linear_128_384_sm2(&prob, qs, pipe_row, gridDim.y); break;
         default: return;
     }
 }
@@ -203,12 +203,15 @@ at::Tensor linear_128_384(
 
     Problem::Queues * qs;
     cudaMalloc(&qs, sizeof(Problem::Queues));
-
     cudaMemset(qs, 0, sizeof(Problem::Queues));
 
+    using GemmShape = cutlass::gemm::GemmShape<Problem::mblk, Problem::od, Problem::od>;
+    using Types = PipeGemmBiasRelu<GemmShape>;
+    using SmemBuffers = Types::SmemBuffers;
+    configure_smem((const void *)linear_128_384_device, sizeof(SmemBuffers));
 
     cuda_time_kernel_ms([&]() {
-        linear_128_384_device<<<grid, block>>>(
+        linear_128_384_device<<<grid, block, sizeof(SmemBuffers)>>>(
             x.size(0),
             (half *)x.data_ptr<at::Half>(),
             (half *)w.data_ptr<at::Half>(),

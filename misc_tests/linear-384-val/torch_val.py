@@ -26,12 +26,19 @@ else:
     print('CUDA not available, linear_384_cuda will not be available')
 
 if __name__ == '__main__':
-    x = torch.randn(1024, 384, dtype=torch.float16, device='cuda')
+    x = torch.randn(256, 384, dtype=torch.float16, device='cuda')
     w = torch.randn(384, 128, dtype=torch.float16, device='cuda')
     b = torch.randn(128, dtype=torch.float16, device='cuda')
 
-    y_ref = torch.matmul(x, w) + b
+    y_ref = torch.nn.functional.relu(torch.nn.functional.linear(x, w.t(), b))
     y_act = linear_384_cuda.linear_128_384(x, w, b)
+
+    print('y_ref: ', y_ref)
+    print('y_act: ', y_act)
+
+    print(torch.allclose(
+        y_act[128:256, 0],
+        torch.zeros(128, 128, dtype=torch.float16, device='cuda')))
 
     # Print L2 error
     print('L2 error: ', torch.norm(y_ref - y_act))
