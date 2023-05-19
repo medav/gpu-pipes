@@ -60,3 +60,19 @@ void configure_smem(const void * func, const size_t smem) {
 
     printf("SMEM: %zu\n", smem);
 }
+
+void pin_memory(void * ptr, size_t size) {
+    cudaStreamAttrValue attribute;
+    auto& window = attribute.accessPolicyWindow;
+    window.base_ptr = ptr;
+    window.num_bytes = size;
+    window.hitRatio = 1.0;
+    window.hitProp = cudaAccessPropertyPersisting;
+    window.missProp = cudaAccessPropertyStreaming;
+
+    cudaStreamSetAttribute(
+        cudaStreamDefault,
+        cudaStreamAttributeAccessPolicyWindow,
+        &attribute
+    );
+}
