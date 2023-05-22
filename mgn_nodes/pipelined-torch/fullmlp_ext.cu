@@ -17,21 +17,6 @@
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
 #define CHECK_INPUT(x) CHECK_CUDA(x); CHECK_CONTIGUOUS(x)
 
-using ProblemShape = cutlass::gemm::GemmShape<MgnFullMlp::mblk, 128, 128>;
-
-const size_t max_smem = std::max({
-    sizeof(typename PipeGemm<ProblemShape>::SmemBuffers),
-    sizeof(typename PipeGemmBias<ProblemShape>::SmemBuffers),
-    sizeof(typename PipeGemmBiasRelu<ProblemShape>::SmemBuffers)
-});
-
-const size_t max_warps = std::max({
-    PipeGemm<ProblemShape>::num_warps,
-    PipeGemmBias<ProblemShape>::num_warps,
-    PipeGemmBiasRelu<ProblemShape>::num_warps,
-    (size_t)16
-});
-
 
 template<typename DT, size_t M, size_t D>
 struct QueueEntry2D {
@@ -89,14 +74,29 @@ struct MgnFullMlp {
 using BlockShape = cutlass::gemm::GemmShape<MgnFullMlp::mblk, 128, 128>;
 using LayerNormBlock = LayerNormShape<MgnFullMlp::mblk, 128>;
 
+
+const size_t max_smem = std::max({
+    sizeof(typename PipeGemm<BlockShape>::SmemBuffers),
+    sizeof(typename PipeGemmBias<BlockShape>::SmemBuffers),
+    sizeof(typename PipeGemmBiasRelu<BlockShape>::SmemBuffers)
+});
+
+const size_t max_warps = std::max({
+    PipeGemm<BlockShape>::num_warps,
+    PipeGemmBias<BlockShape>::num_warps,
+    PipeGemmBiasRelu<BlockShape>::num_warps,
+    (size_t)16
+});
+
+
 __device__ void mlp0_sm0(MgnFullMlp *prob, size_t row, size_t num_rows) {
-    if (threadIdx.y >= PipeGemm<ProblemShape>::num_warps) return;
+    if (threadIdx.y >= PipeGemm<BlockShape>::num_warps) return;
     const size_t num_iters = prob->m / MgnFullMlp::mblk / num_rows;
-    TensorView weight = {&prob->w1[0], MgnFullMlp::d * 3};
+    TensorView weight = {&prob->w1[0], MgnFullMlp::d};
 
     MemoryReader ir(
-        &prob->in[row * prob->mi * MgnFullMlp::d * 3 + 0],
-        num_rows * MgnFullMlp::mblk * MgnFullMlp::d,
+        &prob->in[row * num_iters * MgnFullMlp::mblk * MgnFullMlp::d * 3 + 0],
+        MgnFullMlp::mblk * MgnFullMlp::d,
         MgnFullMlp::d * 3);
 
     NullReader ar;
@@ -107,13 +107,13 @@ __device__ void mlp0_sm0(MgnFullMlp *prob, size_t row, size_t num_rows) {
 
 
 __device__ void mlp0_sm1(MgnFullMlp *prob, size_t row, size_t num_rows) {
-    if (threadIdx.y >= PipeGemm<ProblemShape>::num_warps) return;
+    if (threadIdx.y >= PipeGemm<BlockShape>::num_warps) return;
     const size_t num_iters = prob->m / MgnFullMlp::mblk / num_rows;
-    TensorView weight = {&prob->w1[128 * MgnFullMlp::d], MgnFullMlp::d * 3};
+    TensorView weight = {&prob->w1[128 * MgnFullMlp::d], MgnFullMlp::d};
 
     MemoryReader ir(
-        &prob->in[row * prob->mi * MgnFullMlp::d * 3 + 128],
-        num_rows * MgnFullMlp::mblk * MgnFullMlp::d,
+        &prob->in[row * num_iters * MgnFullMlp::mblk * MgnFullMlp::d * 3 + 128],
+        MgnFullMlp::mblk * MgnFullMlp::d,
         MgnFullMlp::d * 3);
 
     QueueReader ar(prob->qs[row].q01);
@@ -123,14 +123,14 @@ __device__ void mlp0_sm1(MgnFullMlp *prob, size_t row, size_t num_rows) {
 }
 
 __device__ void mlp0_sm2(MgnFullMlp *prob, size_t row, size_t num_rows) {
-    if (threadIdx.y >= PipeGemm<ProblemShape>::num_warps) return;
+    if (threadIdx.y >= PipeGemm<BlockShape>::num_warps) return;
     const size_t num_iters = prob->m / MgnFullMlp::mblk / num_rows;
-    TensorView weight = {&prob->w1[256 * MgnFullMlp::d], MgnFullMlp::d * 3};
+    TensorView weight = {&prob->w1[256 * MgnFullMlp::d], MgnFullMlp::d};
     TensorView bias = {&prob->b1[0], 0};
 
     MemoryReader ir(
-        &prob->in[row * prob->mi * MgnFullMlp::d * 3 + 256],
-        num_rows * MgnFullMlp::mblk * MgnFullMlp::d,
+        &prob->in[row * num_iters * MgnFullMlp::mblk * MgnFullMlp::d * 3 + 256],
+        MgnFullMlp::mblk * MgnFullMlp::d,
         MgnFullMlp::d * 3);
 
     QueueReader ar(prob->qs[row].q12);
@@ -140,7 +140,7 @@ __device__ void mlp0_sm2(MgnFullMlp *prob, size_t row, size_t num_rows) {
 }
 
 __device__ void mlp1_sm0(MgnFullMlp *prob, size_t row, size_t num_rows) {
-    if (threadIdx.y >= PipeGemm<ProblemShape>::num_warps) return;
+    if (threadIdx.y >= PipeGemm<BlockShape>::num_warps) return;
     const size_t num_iters = prob->m / MgnFullMlp::mblk / num_rows;
     TensorView weight = {&prob->w2[0], MgnFullMlp::d};
     TensorView bias = {&prob->b2[0], 0};
@@ -153,7 +153,7 @@ __device__ void mlp1_sm0(MgnFullMlp *prob, size_t row, size_t num_rows) {
 }
 
 __device__ void mlp2_sm0(MgnFullMlp *prob, size_t row, size_t num_rows) {
-    if (threadIdx.y >= PipeGemm<ProblemShape>::num_warps) return;
+    if (threadIdx.y >= PipeGemm<BlockShape>::num_warps) return;
     const size_t num_iters = prob->m / MgnFullMlp::mblk / num_rows;
     TensorView weight = {&prob->w3[0], MgnFullMlp::d};
     TensorView bias = {&prob->b3[0], 0};
@@ -167,16 +167,29 @@ __device__ void mlp2_sm0(MgnFullMlp *prob, size_t row, size_t num_rows) {
 
 __device__ void ln_sm(MgnFullMlp *prob, size_t row, size_t num_rows, size_t ln, size_t num_lns) {
     const size_t num_out_blocks = num_rows * num_lns;
-    const size_t out_block = ln * num_rows + row;
-    const size_t num_iters = prob->m / MgnFullMlp::mblk / num_out_blocks;
+    const size_t out_block = row * num_lns + ln;
+    const size_t num_iters_per_row = prob->m / MgnFullMlp::mblk / num_rows;
+    const size_t num_iters =
+        num_iters_per_row / num_lns +
+        (ln < num_iters_per_row % num_lns ? 1 : 0);
+
     TensorView gamma = {&prob->gamma[0], 0};
     TensorView beta = {&prob->beta[0], 0};
 
-    QueueReader ir(prob->qs[row].q34);
+    if (threadIdx.x == 0 && threadIdx.y == 0) {
+        printf(
+            "ln_sm: row=%d, ln=%d, num_lns=%d, num_iters=%d\n",
+            (int)row,
+            (int)ln,
+            (int)num_lns,
+            (int)num_iters);
+    }
+
+    SplitQueueReader ir(prob->qs[row].lnq, ln, num_lns);
     NullReader ar;
     MemoryWriter ow(
-        &prob->out[out_block * MgnFullMlp::mblk * MgnFullMlp::d],
-        num_out_blocks * mblk * MgnFullMlp::d,
+        &prob->out[(row * num_iters_per_row + ln) * MgnFullMlp::mblk * MgnFullMlp::d],
+        num_lns * MgnFullMlp::mblk * MgnFullMlp::d,
         MgnFullMlp::d);
 
     pipe_layer_norm<LayerNormBlock>(gamma, beta, ir, ow, num_iters);
@@ -197,7 +210,7 @@ __global__ void fullmlp_device(MgnFullMlp * prob) {
             int ln_col = pipe_col - MgnFullMlp::n_mlp_cols;
 
             if (ln_col < MgnFullMlp::n_ln_cols) {
-                ln_sm(prob, pipe_row, ln_col, MgnFullMlp::n_ln_cols);
+                ln_sm(prob, pipe_row, gridDim.y, ln_col, MgnFullMlp::n_ln_cols);
             }
 
             return;
@@ -213,7 +226,7 @@ at::Tensor mgn_fullmlp(
     at::Tensor w3,    // [128, 128]
     at::Tensor b3,    // [128]
     at::Tensor gamma, // [128]
-    at::Tensor beta,  // [128]
+    at::Tensor beta   // [128]
 ) {
     CHECK_INPUT(x);
     CHECK_INPUT(w1);
@@ -232,7 +245,7 @@ at::Tensor mgn_fullmlp(
     assert(gamma.size(0) == 128 && beta.size(0) == 128);
 
     dim3 grid(MgnFullMlp::n_cols, MgnFullMlp::n_rows);
-    dim3 block(32, 4);
+    dim3 block(32, 8);
 
     typename MgnFullMlp::Queues * qs_dev;
     cudaErrCheck(cudaMalloc(&qs_dev, MgnFullMlp::n_rows * sizeof(typename MgnFullMlp::Queues)));
@@ -264,7 +277,7 @@ at::Tensor mgn_fullmlp(
         fullmlp_device<<<grid, block, max_smem>>>(prob_dev);
     });
 
-    cudaFree(qs);
+    cudaFree(qs_dev);
 
     return out;
 }
