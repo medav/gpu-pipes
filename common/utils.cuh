@@ -57,8 +57,6 @@ void configure_smem(const void * func, const size_t smem) {
         func,
         cudaFuncAttributeMaxDynamicSharedMemorySize,
         smem));
-
-    printf("SMEM: %zu\n", smem);
 }
 
 void pin_memory(void * ptr, size_t size) {
