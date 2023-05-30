@@ -11,6 +11,7 @@ INCS+=-I../common -I../../common -I../../../common
 INCS+=-I$(CUTLASS_INC) -I$(CUTLASS_PATH)/tools/util/include/
 INCS+=-I$(CUTLASS_PATH)/tools/util/include
 
+EXTRA_FLAGS?=
 
 .PHONY: default run objdump gdb
 
@@ -23,7 +24,9 @@ $(APP).elf: $(APP).cu $(HDRS)
 	/usr/local/cuda/bin/nvcc \
 		--expt-relaxed-constexpr \
 		-O3 \
+		-Xptxas="-v" \
 		-std=c++17 \
+		$(EXTRA_FLAGS) \
 		-o $@ \
 		-arch=sm_80 \
 		$(LIBS) \
