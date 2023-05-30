@@ -1,6 +1,14 @@
 
 import torch
 import torch.nn as nn
+import os
+os.environ['TORCH_CUDA_ARCH_LIST'] = '8.0'
+
+import torch.utils.cpp_extension
+torch.utils.cpp_extension.COMMON_NVCC_FLAGS = [
+    '--expt-relaxed-constexpr'
+]
+
 from torch.utils.cpp_extension import load
 import os
 import time
