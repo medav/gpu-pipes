@@ -172,12 +172,12 @@ __device__ void mlp2_sm0(MgnFullMlp& prob, int row) {
 
     QueueReader ir(prob.qs[row].q34);
     NullReader ar;
-    // QueueWriter ow(prob.qs[row].lnq);
+    QueueWriter ow(prob.qs[row].lnq);
 
-    MemoryWriter ow(
-        &prob.out[row * num_iters * MgnFullMlp::mblk * MgnFullMlp::d],
-        MgnFullMlp::mblk * MgnFullMlp::d,
-        MgnFullMlp::d);
+    // MemoryWriter ow(
+    //     &prob.out[row * num_iters * MgnFullMlp::mblk * MgnFullMlp::d],
+    //     MgnFullMlp::mblk * MgnFullMlp::d,
+    //     MgnFullMlp::d);
 
     pipe_gemm_bias<BlockShape>(
         {&prob.w3[0], MgnFullMlp::d},
@@ -307,7 +307,7 @@ void mgn_fullmlp_out(
     assert(w3.size(0) == 128 && w3.size(1) == 128 && b3.size(0) == 128);
     assert(gamma.size(0) == 128 && beta.size(0) == 128);
 
-    dim3 grid(MgnFullMlp::n_mlp_cols, MgnFullMlp::n_rows);
+    dim3 grid(MgnFullMlp::n_cols, MgnFullMlp::n_rows);
     dim3 block(32, num_warps);
 
     configure_smem_once();
