@@ -4,13 +4,6 @@
 #include "layer_norm_v2.cuh"
 #include "common.cuh"
 
-#define FULL_MASK 0xffffffff
-
-#define WARP_REDUCE(val) \
-    for (int offset = 16; offset > 0; offset /= 2) { \
-        val += __shfl_down_sync(FULL_MASK, val, offset); \
-    }
-
 template<int M, int D>
 struct LayerNormShape {
     static constexpr int kM = M;
@@ -18,6 +11,7 @@ struct LayerNormShape {
 };
 
 template<
+    int NWARPS,
     typename Shape,
     typename InputReader,
     typename OutputWriter>
@@ -28,41 +22,35 @@ __device__ void pipe_layer_norm(
     OutputWriter& ow,
     size_t num_iters
 ) {
-    const int nwarps = 16;
-    const int lane = threadIdx.x;
-    const int warp = threadIdx.y;
-    const int thread = warp * 32 + lane;
-    const int num_threads = blockDim.x * blockDim.y;
+    const int thread = threadIdx.y * 32 + threadIdx.x;
 
-    __shared__ half s_weight[Shape::kD];
-    __shared__ half s_bias[Shape::kD];
-    __shared__ float in_shared[nwarps][Shape::kD];
+    using SmemBuffers = LayerNormSmemBuffers<Shape::kD, NWARPS>;
+    extern __shared__ char smem_raw[];
+    SmemBuffers * smem = reinterpret_cast<SmemBuffers *>(smem_raw);
 
-    memcpy_async_1r_v3<Shape::kD * sizeof(half)>(
-        &s_weight[0],
+    memcpy_async_1r_v2<NWARPS * 32, Shape::kD * sizeof(half)>(
+        &smem->gamma[0],
         weight.data,
-        thread,
-        num_threads);
+        thread);
 
-    memcpy_async_1r_v3<Shape::kD * sizeof(half)>(
-        &s_bias[0],
+    memcpy_async_1r_v2<NWARPS * 32, Shape::kD * sizeof(half)>(
+        &smem->beta[0],
         bias.data,
-        thread,
-        num_threads);
+        thread);
 
     commit_group();
     wait_all();
 
-    for (size_t i = 0; i < num_iters; i++) {
+    for (int i = 0; i < num_iters; i++) {
         TensorView it = ir.read_acquire();
         TensorView ot = ow.write_acquire();
 
-        internal_layer_norm<Shape::kD, nwarps>(
+        internal_layer_norm<Shape::kD, NWARPS>(
             it.data,
-            &s_weight[0],
-            &s_bias[0],
+            &smem->gamma[0],
+            &smem->beta[0],
             ot.data,
-            &in_shared[0][0],
+            &smem->in[0][0],
             Shape::kM
         );
 

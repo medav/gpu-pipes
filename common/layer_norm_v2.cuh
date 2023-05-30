@@ -61,10 +61,9 @@ __device__ void internal_layer_norm(
         var /= D;
         float sqrt_var = sqrtf(var + 1e-5f);
 
-
         #pragma unroll
         for (int d = lane; d < D; d += 32) {
-            float x = __half2float(in_ptr[d]);
+            float x = s_in[d];
             float norm = (x - mean) / sqrt_var;
             float y = norm * __half2float(gamma[d]) + __half2float(beta[d]);
             out[row_off + d] = __float2half(y);

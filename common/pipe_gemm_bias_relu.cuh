@@ -27,7 +27,7 @@
 template<typename ProblemSize>
 struct PipeGemmBiasRelu {
     using ThreadBlockShape = cutlass::gemm::GemmShape<ProblemSize::kM, ProblemSize::kN, 32>;
-    using WarpShape = cutlass::gemm::GemmShape<64, 64, 32>;
+    using WarpShape = cutlass::gemm::GemmShape<32, 64, 32>;
 
     using Kernel = typename cutlass::gemm::kernel::DefaultGemmUniversal<
         cutlass::half_t, cutlass::layout::RowMajor, cutlass::ComplexTransform::kNone, 8,    // transposed B operand
@@ -40,10 +40,10 @@ struct PipeGemmBiasRelu {
         WarpShape,   // warp tile
         cutlass::gemm::GemmShape<16, 8, 16>,    // instruction tile
         cutlass::epilogue::thread::LinearCombination<
-        cutlass::half_t,
-        8,
-        cutlass::half_t,
-        cutlass::half_t
+            cutlass::half_t,
+            8,
+            cutlass::half_t,
+            cutlass::half_t
         >,
         cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<8>,
         3,
@@ -100,15 +100,15 @@ __device__ void pipe_gemm_bias_relu(
     InputReader& ir,
     AccumReader& ar,
     OutputWriter& ow,
-    size_t num_iters
+    int num_iters
 ) {
     using Types = PipeGemmBiasRelu<ProblemShape>;
     extern __shared__ char smem_raw[];
     typename Types::SmemBuffers * smem =
         reinterpret_cast<typename Types::SmemBuffers *>(smem_raw);
 
-    cutlass::MatrixCoord tb_offset_A {0, 0};
-    cutlass::MatrixCoord tb_offset_B {0, 0};
+    const cutlass::MatrixCoord tb_offset_A {0, 0};
+    const cutlass::MatrixCoord tb_offset_B {0, 0};
 
     const int tb_thread_id = threadIdx.y * blockDim.x + threadIdx.x;
     const int warp_id = __shfl_sync(0xffffffff, threadIdx.y, 0);
@@ -118,7 +118,7 @@ __device__ void pipe_gemm_bias_relu(
 
     typename Types::Mma::FragmentC accum;
 
-    for (size_t i = 0; i < num_iters; i++) {
+    for (int i = 0; i < num_iters; i++) {
         TensorView it = ir.read_acquire();
 
         typename Types::Mma::IteratorA iterator_A(
