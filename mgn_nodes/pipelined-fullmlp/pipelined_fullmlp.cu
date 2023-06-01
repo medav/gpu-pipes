@@ -1,4 +1,6 @@
-#include "mgn_node_pipe.cuh"
+
+#include <cuda_fp16.h>
+
 #include "pipes.cuh"
 #include "pipe_gemm.cuh"
 #include "pipe_gemm_bias.cuh"
@@ -7,177 +9,231 @@
 
 #include "utils.cuh"
 
-using ProblemShape = cutlass::gemm::GemmShape<MgnNodeMlp::mblk, 128, 128>;
 
-const size_t max_smem = std::max({
-    sizeof(typename PipeGemm<ProblemShape>::SmemBuffers),
-    sizeof(typename PipeGemmBias<ProblemShape>::SmemBuffers),
-    sizeof(typename PipeGemmBiasRelu<ProblemShape>::SmemBuffers)
-});
+using ProblemShape = cutlass::gemm::GemmShape<128, 128, 128>;
 
-const size_t max_warps = std::max({
+const size_t num_warps = std::max({
     PipeGemm<ProblemShape>::num_warps,
     PipeGemmBias<ProblemShape>::num_warps,
     PipeGemmBiasRelu<ProblemShape>::num_warps
 });
 
-__device__ void mlp0_sm0(MgnNodeMlp *prob, size_t row) {
-    using Input = MemoryReader;
-    using Accum = NullReader;
-    using Output = QueueWriter<MgnNodeMlp::Queue>;
+template<typename DT, size_t M, size_t D>
+struct QueueEntry2D {
+    using Element = DT;
+    Element buf[M][D];
 
-    const size_t mblk = MgnNodeMlp::mblk;
-    const size_t num_iters = prob->mi / MgnNodeMlp::mblk;
+    __device__ half * as_ptr() { return (half *)buf; }
+    __device__ TensorView as_view() { return {as_ptr(), D}; }
+    __device__ QueueEntry2D() {}
+};
 
-    Input input(&prob->in[row * prob->mi][0], mblk * prob->d, MgnNodeMlp::d * 3);
-    Accum accum;
-    Output output(prob->qs.q01[row]);
+struct MgnFullMlp {
+    static const int d = 128;
+    static const int n_rows = 1;
 
-    for (size_t i = 0; i < MgnNodeMlp::ni; i++) {
-        input.reset();
-        pipe_gemm<
-            cutlass::gemm::GemmShape<mblk, 128, 128>,
-            Input,
-            Accum,
-            Output
-        >({&prob->w1[0][0], MgnNodeMlp::d * 3}, input, accum, output, num_iters);
-    }
-}
+    static const int n_mlp_cols = 5;
+    static const int n_ln_cols = 5;
+    static const int n_cols = n_mlp_cols + n_ln_cols;
 
-__device__ void mlp0_sm1(MgnNodeMlp *prob, size_t row) {
-    using Input = MemoryReader;
-    using Accum = QueueReader<MgnNodeMlp::Queue>;
-    using Output = QueueWriter<MgnNodeMlp::Queue>;
+    static const int mblk = 128;
+    static const int qlen = 2;
+    static const int ln_qlen = n_ln_cols + 1;
 
-    const size_t mblk = MgnNodeMlp::mblk;
-    const size_t num_iters = prob->mi / MgnNodeMlp::mblk;
+    int m;
 
-    Input input(&prob->in[row * prob->mi][MgnNodeMlp::d], mblk * prob->d, MgnNodeMlp::d * 3);
-    Accum accum(prob->qs.q01[row]);
-    Output output(prob->qs.q12[row]);
+    half * in;
+    half * w1;
+    half * b1;
+    half * w2;
+    half * b2;
+    half * w3;
+    half * b3;
+    half * gamma;
+    half * beta;
+    half * out;
 
-    for (size_t i = 0; i < MgnNodeMlp::ni; i++) {
-        input.reset();
-        pipe_gemm<
-            cutlass::gemm::GemmShape<mblk, 128, 128>,
-            Input,
-            Accum,
-            Output
-        >({&prob->w1[0][MgnNodeMlp::d], MgnNodeMlp::d * 3}, input, accum, output, num_iters);
-    }
-}
+    using QEntry = QueueEntry2D<half, mblk, d>;
+    using Queue = MpmcRingQueue<QEntry, qlen, 1, 1>;
+    using LayerNormQueue = MpmcRingQueue<QEntry, ln_qlen, 1, 1>;
 
-__device__ void mlp0_sm2(MgnNodeMlp *prob, size_t row) {
-    using Input = MemoryReader;
-    using Accum = QueueReader<MgnNodeMlp::Queue>;
-    using Output = QueueWriter<MgnNodeMlp::Queue>;
+    struct Queues {
+        Queue q01;
+        Queue q12;
+        Queue q23;
+        Queue q34;
+        LayerNormQueue lnq;
+    };
 
-    const size_t mblk = MgnNodeMlp::mblk;
-    const size_t num_iters = prob->mi / MgnNodeMlp::mblk;
+    Queues * qs;
+};
 
-    Input input(&prob->in[row * prob->mi][MgnNodeMlp::d * 2], mblk * prob->d, MgnNodeMlp::d * 3);
-    Accum accum(prob->qs.q12[row]);
-    Output output(prob->qs.q23[row]);
+using BlockShape = cutlass::gemm::GemmShape<MgnFullMlp::mblk, 128, 128>;
+using LayerNormBlock = LayerNormShape<MgnFullMlp::mblk, 128>;
 
 
-    for (size_t i = 0; i < MgnNodeMlp::ni; i++) {
-        input.reset();
-        pipe_gemm_bias_relu<
-            cutlass::gemm::GemmShape<mblk, 128, 128>,
-            Input,
-            Accum,
-            Output
-        >({&prob->w1[0][MgnNodeMlp::d * 2], MgnNodeMlp::d * 3}, {&prob->b1[0], 0}, input, accum, output, num_iters);
-    }
-}
-
-__device__ void mlp1_sm0(MgnNodeMlp *prob, size_t row) {
-    using Input = QueueReader<MgnNodeMlp::Queue>;
-    using Accum = NullReader;
-    using Output = QueueWriter<MgnNodeMlp::Queue>;
-
-    const size_t mblk = MgnNodeMlp::mblk;
-    const size_t num_iters = prob->mi / MgnNodeMlp::mblk;
-
-    Input input(prob->qs.q23[row]);
-    Accum accum;
-    Output output(prob->qs.q34[row]);
-
-    for (size_t i = 0; i < MgnNodeMlp::ni; i++) {
-        pipe_gemm_bias_relu<
-            cutlass::gemm::GemmShape<mblk, 128, 128>,
-            Input,
-            Accum,
-            Output
-        >({&prob->w2[0][0], MgnNodeMlp::d}, {&prob->b2[0], 0}, input, accum, output, num_iters);
-    }
-}
-
-__device__ void mlp2_sm0(MgnNodeMlp *prob, size_t row) {
-    using Input = QueueReader<MgnNodeMlp::Queue>;
-    using Accum = NullReader;
-    using Output = QueueWriter<MgnNodeMlp::LayerNormQueue>;
-
-    const size_t mblk = MgnNodeMlp::mblk;
-    const size_t num_iters = prob->mi / MgnNodeMlp::mblk;
-
-    Input input(prob->qs.q34[row]);
-    Accum accum;
-    Output output(prob->qs.lnq[row]);
+const size_t max_smem = std::max({
+    sizeof(typename PipeGemm<BlockShape>::SmemBuffers),
+    sizeof(typename PipeGemmBias<BlockShape>::SmemBuffers),
+    sizeof(typename PipeGemmBiasRelu<BlockShape>::SmemBuffers),
+    sizeof(LayerNormSmemBuffers<128, num_warps>)
+});
 
 
-    for (size_t i = 0; i < MgnNodeMlp::ni; i++) {
-        output.reset();
-        pipe_gemm_bias<
-            cutlass::gemm::GemmShape<mblk, 128, 128>,
-            Input,
-            Accum,
-            Output
-        >({&prob->w3[0][0], MgnNodeMlp::d}, {&prob->b3[0], 0}, input, accum, output, num_iters);
-    }
-}
+__device__ void mlp0_sm0(MgnFullMlp& prob, int row) {
+    if (threadIdx.y >= PipeGemm<BlockShape>::num_warps) return;
+    const int num_iters = prob.m / MgnFullMlp::mblk / MgnFullMlp::n_rows;
 
-__device__ void ln_sm(MgnNodeMlp *prob, size_t row, int seq_off, int num_lns) {
-    using Input = SplitQueueReader<MgnNodeMlp::LayerNormQueue>;
-    using Output = MemoryWriter;
+    MemoryReader ir(
+        &prob.in[row * num_iters * MgnFullMlp::mblk * MgnFullMlp::d * 3 + 0],
+        MgnFullMlp::mblk * MgnFullMlp::d * 3,
+        MgnFullMlp::d * 3);
 
-    const size_t mblk = MgnNodeMlp::mblk;
-    const size_t num_iters = prob->mi / MgnNodeMlp::mblk / num_lns;
+    NullReader ar;
+    QueueWriter ow(prob.qs[row].q01);
 
-    Input input(prob->qs.lnq[row], seq_off, num_lns);
-
-    Output output(
-        &prob->out[mblk * seq_off][0],
-        mblk * num_lns * MgnNodeMlp::d,
-        MgnNodeMlp::d);
-
-    for (size_t i = 0; i < MgnNodeMlp::ni; i++) {
-        output.reset();
-        pipe_layer_norm<max_warps, LayerNormShape<mblk, 128>, Input, Output>(
-            {&prob->gamma[0], 0}, {&prob->beta[0], 0}, input, output, num_iters);
-    }
-
+    pipe_gemm<BlockShape>(
+        {&prob.w1[0], MgnFullMlp::d},
+        ir,
+        ar,
+        ow,
+        num_iters);
 }
 
 
+__device__ void mlp0_sm1(MgnFullMlp& prob, int row) {
+    if (threadIdx.y >= PipeGemm<BlockShape>::num_warps) return;
+    const int num_iters = prob.m / MgnFullMlp::mblk / MgnFullMlp::n_rows;
 
-template<typename QT>
-__device__ void consume_dummy(QT& q, size_t num_iters) {
-    QueueReader<QT> r(q);
+    MemoryReader ir(
+        &prob.in[row * num_iters * MgnFullMlp::mblk * MgnFullMlp::d * 3 + 128],
+        MgnFullMlp::mblk * MgnFullMlp::d * 3,
+        MgnFullMlp::d * 3);
 
-    r.reset();
+    QueueReader ar(prob.qs[row].q01);
+    QueueWriter ow(prob.qs[row].q12);
 
-    for (size_t i = 0; i < num_iters; i++) {
-        r.read_acquire();
-        r.read_release();
-    }
+    pipe_gemm<BlockShape>(
+        {&prob.w1[128 * MgnFullMlp::d], MgnFullMlp::d},
+        ir,
+        ar,
+        ow,
+        num_iters);
 }
 
+__device__ void mlp0_sm2(MgnFullMlp& prob, int row) {
+    if (threadIdx.y >= PipeGemm<BlockShape>::num_warps) return;
+    const int num_iters = prob.m / MgnFullMlp::mblk / MgnFullMlp::n_rows;
 
-__global__ void kernel(MgnNodeMlp * prob) {
-    void * smem = nullptr;
-    size_t pipe_col = blockIdx.x;
-    size_t pipe_row = blockIdx.y;
+    MemoryReader ir(
+        &prob.in[row * num_iters * MgnFullMlp::mblk * MgnFullMlp::d * 3 + 256],
+        MgnFullMlp::mblk * MgnFullMlp::d * 3,
+        MgnFullMlp::d * 3);
+
+    QueueReader ar(prob.qs[row].q12);
+    QueueWriter ow(prob.qs[row].q23);
+
+    pipe_gemm_bias_relu<BlockShape>(
+        {&prob.w1[256 * MgnFullMlp::d], MgnFullMlp::d},
+        {&prob.b1[0], 0},
+        ir,
+        ar,
+        ow,
+        num_iters);
+}
+
+__device__ void mlp1_sm0(MgnFullMlp& prob, int row) {
+    if (threadIdx.y >= PipeGemm<BlockShape>::num_warps) return;
+    const int num_iters = prob.m / MgnFullMlp::mblk / MgnFullMlp::n_rows;
+
+    QueueReader ir(prob.qs[row].q23);
+    NullReader ar;
+    QueueWriter ow(prob.qs[row].q34);
+
+    pipe_gemm_bias_relu<BlockShape>(
+        {&prob.w2[0], MgnFullMlp::d},
+        {&prob.b2[0], 0},
+        ir,
+        ar,
+        ow,
+        num_iters);
+}
+
+__device__ void mlp2_sm0(MgnFullMlp& prob, int row) {
+    if (threadIdx.y >= PipeGemm<BlockShape>::num_warps) return;
+    const int num_iters = prob.m / MgnFullMlp::mblk / MgnFullMlp::n_rows;
+
+    QueueReader ir(prob.qs[row].q34);
+    NullReader ar;
+    // QueueWriter ow(prob.qs[row].lnq);
+
+    MemoryWriter ow(
+        &prob.out[row * num_iters * MgnFullMlp::mblk * MgnFullMlp::d],
+        MgnFullMlp::mblk * MgnFullMlp::d,
+        MgnFullMlp::d);
+
+    pipe_gemm_bias<BlockShape>(
+        {&prob.w3[0], MgnFullMlp::d},
+        {&prob.b3[0], 0},
+        ir,
+        ar,
+        ow,
+        num_iters);
+}
+
+__device__ void ln_sm(MgnFullMlp& prob, int row, int ln) {
+    const int num_iters_per_row = prob.m / MgnFullMlp::mblk / MgnFullMlp::n_rows;
+    const int num_iters =
+        num_iters_per_row / MgnFullMlp::n_ln_cols +
+        (ln < num_iters_per_row % MgnFullMlp::n_ln_cols ? 1 : 0);
+
+
+    SplitQueueReader ir(prob.qs[row].lnq, ln, MgnFullMlp::n_ln_cols);
+    NullReader ar;
+    MemoryWriter ow(
+        &prob.out[(row * num_iters_per_row + ln) * MgnFullMlp::mblk * MgnFullMlp::d],
+        MgnFullMlp::n_ln_cols * MgnFullMlp::mblk * MgnFullMlp::d,
+        MgnFullMlp::d);
+
+    pipe_layer_norm<num_warps, LayerNormBlock>(
+        {&prob.gamma[0], 0},
+        {&prob.beta[0], 0},
+        ir,
+        ow,
+        num_iters);
+}
+
+__global__ void fullmlp_device(
+    int m,
+    half * x,     // [M, 384]
+    half * w1,    // [384, 128]
+    half * b1,    // [128]
+    half * w2,    // [128, 128]
+    half * b2,    // [128]
+    half * w3,    // [128, 128]
+    half * b3,    // [128]
+    half * gamma, // [128]
+    half * beta,  // [128]
+    half * out,   // [M, 128]
+    void * qs
+) {
+    int pipe_col = blockIdx.x;
+    int pipe_row = blockIdx.y;
+
+    MgnFullMlp prob = {
+        .m = m,
+        .in = x,
+        .w1 = w1,
+        .b1 = b1,
+        .w2 = w2,
+        .b2 = b2,
+        .w3 = w3,
+        .b3 = b3,
+        .gamma = gamma,
+        .beta = beta,
+        .out = out,
+        .qs = (typename MgnFullMlp::Queues *)qs
+    };
 
     switch (pipe_col) {
         case 0: mlp0_sm0(prob, pipe_row); break;
@@ -186,83 +242,91 @@ __global__ void kernel(MgnNodeMlp * prob) {
         case 3: mlp1_sm0(prob, pipe_row); break;
         case 4: mlp2_sm0(prob, pipe_row); break;
         default:
-            int ln_col = pipe_col - MgnNodeMlp::n_mlp_cols;
+            pipe_col -= MgnFullMlp::n_mlp_cols;
 
-            if (ln_col < MgnNodeMlp::n_ln_cols) {
-                ln_sm(prob, pipe_row, ln_col, MgnNodeMlp::n_ln_cols);
+            if (pipe_col < MgnFullMlp::n_ln_cols) {
+                ln_sm(prob, pipe_row, pipe_col);
             }
 
             return;
     }
 }
 
+
+inline typename MgnFullMlp::Queues * global_queue_space() {
+    static typename MgnFullMlp::Queues * qs_dev = nullptr;
+
+    if (qs_dev != nullptr) return qs_dev;
+
+    cudaErrCheck(cudaMalloc(&qs_dev, MgnFullMlp::n_rows * sizeof(*qs_dev)));
+    cudaErrCheck(cudaMemset(qs_dev, 0, MgnFullMlp::n_rows * sizeof(*qs_dev)));
+
+    pin_memory(qs_dev, MgnFullMlp::n_rows * sizeof(*qs_dev));
+
+    return qs_dev;
+}
+
+inline void configure_smem_once() {
+    static bool configured = false;
+    if (configured) return;
+    configure_smem((const void *)fullmlp_device, max_smem);
+    configured = true;
+}
+
+
 int main() {
+    const int M = 32 * 1024;
+    half * x = nullptr;
+    half * w1 = nullptr;
+    half * b1 = nullptr;
+    half * w2 = nullptr;
+    half * b2 = nullptr;
+    half * w3 = nullptr;
+    half * b3 = nullptr;
+    half * gamma = nullptr;
+    half * beta = nullptr;
+    half * out = nullptr;
 
-    cudaErrCheck(cudaDeviceSetCacheConfig(cudaFuncCachePreferShared));
-    cudaErrCheck(cudaFuncSetAttribute(
-        kernel,
-        cudaFuncAttributePreferredSharedMemoryCarveout,
-        cudaSharedmemCarveoutMaxShared));
+    cudaErrCheck(cudaMalloc(&x, M * 384 * sizeof(*x)));
+    cudaErrCheck(cudaMalloc(&w1, 384 * 128 * sizeof(*w1)));
+    cudaErrCheck(cudaMalloc(&b1, 128 * sizeof(*b1)));
+    cudaErrCheck(cudaMalloc(&w2, 128 * 128 * sizeof(*w2)));
+    cudaErrCheck(cudaMalloc(&b2, 128 * sizeof(*b2)));
+    cudaErrCheck(cudaMalloc(&w3, 128 * 128 * sizeof(*w3)));
+    cudaErrCheck(cudaMalloc(&b3, 128 * sizeof(*b3)));
+    cudaErrCheck(cudaMalloc(&gamma, 128 * sizeof(*gamma)));
+    cudaErrCheck(cudaMalloc(&beta, 128 * sizeof(*beta)));
+    cudaErrCheck(cudaMalloc(&out, M * 128 * sizeof(*out)));
 
-    cudaErrCheck(cudaFuncSetAttribute(
-        kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, max_smem));
+    dim3 grid(MgnFullMlp::n_mlp_cols, MgnFullMlp::n_rows);
+    dim3 block(32, num_warps);
 
-    MgnNodeMlp * prob;
-    cudaErrCheck(cudaMalloc(&prob, sizeof(MgnNodeMlp) + 128));
+    configure_smem_once();
 
-    printf("prob: %p\n", prob);
+    float time_ms = cuda_time_kernel_ms([&]() {
+        fullmlp_device<<<grid, block, max_smem>>>(
+            M,
+            x,
+            w1,
+            b1,
+            w2,
+            b2,
+            w3,
+            b3,
+            gamma,
+            beta,
+            out,
+            global_queue_space()
+        );
+    });
 
+    printf("time: %.3f ms\n", time_ms);
 
-    size_t tot_pipe_bytes = sizeof(MgnNodeMlp::Queues);
+    float flops =
+        2.0f * M * (3 * MgnFullMlp::d) * MgnFullMlp::d +
+        2.0f * M * MgnFullMlp::d * MgnFullMlp::d +
+        2.0f * M * MgnFullMlp::d * MgnFullMlp::d;
 
-    printf("Total pipe bytes: %lu\n", tot_pipe_bytes);
-    printf("Total pipe bytes: %lu KB\n", tot_pipe_bytes / 1024);
-
-    printf("Init...\n");
-    init_prob<<<1, 128>>>(prob);
-    cudaErrCheck(cudaDeviceSynchronize());
-
-    cudaStreamAttrValue attribute;
-    auto& window = attribute.accessPolicyWindow;
-    window.base_ptr = &prob->qs;
-    window.num_bytes = sizeof(MgnNodeMlp::Queues);
-    window.hitRatio = 1.0;
-    window.hitProp = cudaAccessPropertyPersisting;
-    window.missProp = cudaAccessPropertyStreaming;
-
-    cudaStreamSetAttribute(
-        cudaStreamDefault,
-        cudaStreamAttributeAccessPolicyWindow,
-        &attribute
-    );
-
-    dim3 grid(MgnNodeMlp::n_cols, MgnNodeMlp::mo);
-    dim3 block(32, max_warps);
-
-    const size_t tot_loop_iters = MgnNodeMlp::ni * MgnNodeMlp::mi / MgnNodeMlp::mblk;
-    printf("Total loop iters: %lu\n", tot_loop_iters);
-
-    printf("SMEM: %lu\n", max_smem);
-    printf("# Warps: %lu\n", max_warps);
-
-    printf("Running...\n");
-    float time_ms = cuda_time_kernel_ms(
-        [&]() {
-            for (size_t i = 0; i < MgnNodeMlp::no; i++) {
-                kernel<<<grid, block, max_smem>>>(prob);
-            }
-        }
-    );
-
-    printf("Total time: %f ms\n", time_ms);
-    printf("Avg. loop iter time: %f ms\n", time_ms / tot_loop_iters);
-
-    float flops_v1 =
-        2.0f * MgnNodeMlp::m * (3 * MgnNodeMlp::d) * MgnNodeMlp::d +
-        2.0f * MgnNodeMlp::m * MgnNodeMlp::d * MgnNodeMlp::d +
-        2.0f * MgnNodeMlp::m * MgnNodeMlp::d * MgnNodeMlp::d;
-    float gflops_v1 = MgnNodeMlp::no * MgnNodeMlp::ni * flops_v1 / (time_ms * 1e6);
+    float gflops_v1 = flops / (time_ms * 1e6);
     printf("+ GFLOPS: %f\n", gflops_v1);
-
-    return 0;
 }
