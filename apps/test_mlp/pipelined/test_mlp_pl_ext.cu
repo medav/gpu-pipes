@@ -213,6 +213,7 @@ void testmlp_out(
     CHECK_INPUT(b2);
     CHECK_INPUT(w3);
     CHECK_INPUT(b3);
+    CHECK_INPUT(out);
 
     assert(x.size(1) == 128);
     assert(w1.size(0) == 128 && w1.size(1) == 128 && b1.size(0) == 128);
@@ -224,18 +225,20 @@ void testmlp_out(
 
     configure_smem_once();
 
-    testmlp_device<<<grid, block, max_smem>>>(
-        x.size(0),
-        (half *)x.data_ptr<at::Half>(),
-        (half *)w1.data_ptr<at::Half>(),
-        (half *)b1.data_ptr<at::Half>(),
-        (half *)w2.data_ptr<at::Half>(),
-        (half *)b2.data_ptr<at::Half>(),
-        (half *)w3.data_ptr<at::Half>(),
-        (half *)b3.data_ptr<at::Half>(),
-        (half *)out.data_ptr<at::Half>(),
-        global_queue_space()
-    );
+    cuda_check_kernel_call([&]() {
+        testmlp_device<<<grid, block, max_smem>>>(
+            x.size(0),
+            (half *)x.data_ptr<at::Half>(),
+            (half *)w1.data_ptr<at::Half>(),
+            (half *)b1.data_ptr<at::Half>(),
+            (half *)w2.data_ptr<at::Half>(),
+            (half *)b2.data_ptr<at::Half>(),
+            (half *)w3.data_ptr<at::Half>(),
+            (half *)b3.data_ptr<at::Half>(),
+            (half *)out.data_ptr<at::Half>(),
+            global_queue_space()
+        );
+    });
 }
 
 at::Tensor testmlp(
