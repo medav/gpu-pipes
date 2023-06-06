@@ -7,8 +7,14 @@ def test_performance(NI=1000):
     M = 1280 * 1024
     print('======== Performance ========')
     torch.manual_seed(0)
-    net = TorchMlp(128, [128, 128, 128], layernorm=False).eval().half().cuda()
     x = torch.randn(M, 128, dtype=torch.float16, device='cuda')
+
+    w1 = torch.randn(128, 128, dtype=torch.float16, device='cuda')
+    b1 = torch.randn(128,      dtype=torch.float16, device='cuda')
+    w2 = torch.randn(128, 128, dtype=torch.float16, device='cuda')
+    b2 = torch.randn(128,      dtype=torch.float16, device='cuda')
+    w3 = torch.randn(128, 128, dtype=torch.float16, device='cuda')
+    b3 = torch.randn(128,      dtype=torch.float16, device='cuda')
 
     out = torch.zeros(M, 128, dtype=torch.float16, device='cuda')
 
@@ -16,16 +22,17 @@ def test_performance(NI=1000):
     for _ in range(NI):
         ext.testmlp_cuda.testmlp_out(
             x,
-            net.model[0][0].weight.t().contiguous(), net.model[0][0].bias,
-            net.model[1][0].weight.t().contiguous(), net.model[1][0].bias,
-            net.model[2][0].weight.t().contiguous(), net.model[2][0].bias,
+            w1, b1,
+            w2, b2,
+            w3, b3,
             out
         )
+    torch.cuda.synchronize()
     t1 = time.perf_counter()
 
     tt = t1 - t0
     flops = M * (128 * 128 + 128 * 128 + 128 * 128) * 2 * NI
-    print(f'Full MLP: {tt:.3f} s, {flops / tt / 1e9:.3f} GFLOPS')
+    print(f'Avg Latency: {tt / NI:.3f} s, {flops / tt / 1e9:.3f} GFLOPS')
 
 
 
