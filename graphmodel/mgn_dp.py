@@ -4,17 +4,17 @@ from .common import *
 
 @dataclass
 class EdgeSet:
-    ef : Tensor
-    srcs : Tensor
-    dsts : Tensor
+    ef : Node
+    srcs : Node
+    dsts : Node
 
 @dataclass
 class MultiGraph:
-    nf : Tensor
+    nf : Node
     edges : list[EdgeSet]
 
 
-def mlp(x : Tensor, out_widths : list[int], activate_lnorm=True, name='mlp'):
+def mlp(x : Node, out_widths : list[int], activate_lnorm=True, name='mlp'):
     widths = [x.shape[1]] + out_widths
     for i, (n_in, n_out) in enumerate(zip(widths[:-1], widths[1:])):
         x = linear(x, n_out, name=f'{name}.linear[{i}]')
@@ -25,7 +25,7 @@ def mlp(x : Tensor, out_widths : list[int], activate_lnorm=True, name='mlp'):
     if activate_lnorm:  x = layernorm(x, name=f'{name}.layernorm')
     return x
 
-def update_edges(nf : Tensor, edge_set : EdgeSet, widths, name='edges'):
+def update_edges(nf : Node, edge_set : EdgeSet, widths, name='edges'):
     src_nf = index(nf, edge_set.srcs, name=f'{name}.src_nf')
     dst_nf = index(nf, edge_set.dsts, name=f'{name}.dst_nf')
     concat_out = concat([src_nf, edge_set.ef, dst_nf], name=f'{name}.concat')
@@ -51,7 +51,6 @@ def message_passing(i : int, x : MultiGraph):
     ]
 
     node_concat_out = concat(node_concat, name=f'mp[{i}].nodes.concat')
-
     new_nf = mlp(node_concat_out, widths, name=f'mp[{i}].nodes.mlp')
 
     for ei in range(len(x.edges)):
@@ -60,27 +59,34 @@ def message_passing(i : int, x : MultiGraph):
 
     return MultiGraph(add(new_nf, x.nf, name=f'mp[{i}].node_resid'), new_edges)
 
-with Graph('MLP') as g:
+B = 1280
+
+with Graph(name='MLP') as g:
     x = MultiGraph(
-        nf=Input((1024, 128), name='node_features'),
+        nf=input((B * 1024, 128), name='node_features'),
         edges=[
             EdgeSet(
-                ef=Input((16384, 128), name='edge_features'),
-                srcs=Input((16384,), name='src_nodes'),
-                dsts=Input((16384,), name='dst_nodes'),
+                ef=input((B * 16384, 128), name='edge_features'),
+                srcs=input((B * 16384,), name='src_nodes'),
+                dsts=input((B * 16384,), name='dst_nodes'),
             ),
             EdgeSet(
-                ef=Input((16384, 128), name='edge_features'),
-                srcs=Input((16384,), name='src_nodes'),
-                dsts=Input((16384,), name='dst_nodes'),
+                ef=input((B * 1024, 128), name='wedge_features'),
+                srcs=input((B * 1024,), name='wsrc_nodes'),
+                dsts=input((B * 1024,), name='wdst_nodes'),
             ),
         ]
     )
 
-    for i in range(15):
-        x = message_passing(i, x)
+    y = message_passing(0, x)
 
 
+g.dump_dot()
+print()
 
+sg = g.subgraph(r'mp\[0\].nodes.mlp..*')
 
-print(g)
+sg.dump_dot()
+print()
+
+sg.pipelined_analysis()
