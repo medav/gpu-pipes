@@ -43,21 +43,21 @@ void testmlp_out(
     assert(w3.size(0) == 128 && w3.size(1) == 128 && b3.size(0) == 128);
 
 
-    bulksync_gemm<MM, 128, 128>(
+    bulksync_gemm<MM, 128, 128, true>(
         (half *)x.data_ptr<at::Half>(),
         (half *)w1.data_ptr<at::Half>(),
         (half *)b1.data_ptr<at::Half>(),
         (half *)y1.data_ptr<at::Half>()
     );
 
-    bulksync_gemm<MM, 128, 128>(
+    bulksync_gemm<MM, 128, 128, true>(
         (half *)y1.data_ptr<at::Half>(),
         (half *)w2.data_ptr<at::Half>(),
         (half *)b2.data_ptr<at::Half>(),
         (half *)y2.data_ptr<at::Half>()
     );
 
-    bulksync_gemm<MM, 128, 128>(
+    bulksync_gemm<MM, 128, 128, true>(
         (half *)y2.data_ptr<at::Half>(),
         (half *)w3.data_ptr<at::Half>(),
         (half *)b3.data_ptr<at::Half>(),

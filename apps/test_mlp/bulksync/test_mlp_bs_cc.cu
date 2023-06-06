@@ -38,21 +38,21 @@ int main() {
 
     float time_ms = cuda_time_kernel_ms([&]() {
         for (size_t i = 0; i < NI; i++) {
-            bulksync_gemm<MM, DD, DD>(
+            bulksync_gemm<MM, DD, DD, true>(
                 x_dev,
                 w1_dev,
                 b1_dev,
                 y1_dev
             );
 
-            bulksync_gemm<MM, DD, DD>(
+            bulksync_gemm<MM, DD, DD, true>(
                 y1_dev,
                 w2_dev,
                 b2_dev,
                 y2_dev
             );
 
-            bulksync_gemm<MM, DD, DD>(
+            bulksync_gemm<MM, DD, DD, true>(
                 y2_dev,
                 w3_dev,
                 b3_dev,
