@@ -21,8 +21,8 @@ at::Tensor layer_norm_128(
     CHECK_INPUT(gamma);
     CHECK_INPUT(beta);
 
-    const int MBLK = 64;
-    const int NW = 32;
+    const int MBLK = 128;
+    const int NW = 4;
 
     at::Tensor out = at::empty_like(x);
 
@@ -42,7 +42,8 @@ at::Tensor layer_norm_128(
     return out;
 }
 
-float bench_layer_norm_128(
+template<int NW, int D>
+float bench_layer_norm(
     at::Tensor x,
     at::Tensor gamma,
     at::Tensor beta,
@@ -54,16 +55,15 @@ float bench_layer_norm_128(
     CHECK_INPUT(beta);
 
     at::Tensor out = at::empty_like(x);
-    const int NW = 32;
 
-    assert(x.size(1) == 128);
+    assert(x.size(1) == D);
 
     dim3 grid(x.size(0) / MBLK);
     dim3 block(32, NW);
 
     float time_ms = cuda_time_kernel_ms([&]() {
         for (int i = 0; i < ni; i++) {
-            device_layer_norm<128, NW><<<grid, block>>>(
+            device_layer_norm<D, NW><<<grid, block>>>(
                 (half *)x.data_ptr<at::Half>(),
                 (half *)gamma.data_ptr<at::Half>(),
                 (half *)beta.data_ptr<at::Half>(),
@@ -76,8 +76,23 @@ float bench_layer_norm_128(
     return time_ms;
 }
 
+
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("layer_norm_128", &layer_norm_128, "layer_norm_128");
-    m.def("bench_layer_norm_128", &bench_layer_norm_128, "bench_layer_norm_128");
+    m.def("bench_layer_norm_4_128",  &bench_layer_norm<4,  128>, "bench_layer_norm_4_128");
+    m.def("bench_layer_norm_8_128",  &bench_layer_norm<8,  128>, "bench_layer_norm_8_128");
+    m.def("bench_layer_norm_16_128", &bench_layer_norm<16, 128>, "bench_layer_norm_16_128");
+    m.def("bench_layer_norm_32_128", &bench_layer_norm<32, 128>, "bench_layer_norm_32_128");
+
+    m.def("bench_layer_norm_4_512",  &bench_layer_norm<4,  512>, "bench_layer_norm_4_512");
+    m.def("bench_layer_norm_8_512",  &bench_layer_norm<8,  512>, "bench_layer_norm_8_512");
+    m.def("bench_layer_norm_16_512", &bench_layer_norm<16, 512>, "bench_layer_norm_16_512");
+    // m.def("bench_layer_norm_32_512", &bench_layer_norm<32, 512>, "bench_layer_norm_32_512");
+
+    m.def("bench_layer_norm_4_1024",  &bench_layer_norm<4,  1024>, "bench_layer_norm_4_1024");
+    m.def("bench_layer_norm_8_1024",  &bench_layer_norm<8,  1024>, "bench_layer_norm_8_1024");
+    // m.def("bench_layer_norm_16_1024", &bench_layer_norm<16, 1024>, "bench_layer_norm_16_1024");
+    // m.def("bench_layer_norm_32_1024", &bench_layer_norm<32, 1024>, "bench_layer_norm_32_1024");
 }
 
