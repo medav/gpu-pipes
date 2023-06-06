@@ -1,15 +1,15 @@
 
-CUTLASS_PATH=/nobackup/medavies/cutlass
-CUTLASS_INC=$(CUTLASS_PATH)/include
-CUTLASS_LIB=$(CUTLASS_PATH)/build/tools/library
+CUTLASS_HOME?=/nobackup/medavies/cutlass
+CUTLASS_INC=$(CUTLASS_HOME)/include
+CUTLASS_LIB=$(CUTLASS_HOME)/build/tools/library
 
 LIBS?=
 LIBS+=-L$(CUTLASS_LIB) -lcutlass
 
 INCS?=
 INCS+=-I../common -I../../common -I../../../common
-INCS+=-I$(CUTLASS_INC) -I$(CUTLASS_PATH)/tools/util/include/
-INCS+=-I$(CUTLASS_PATH)/tools/util/include
+INCS+=-I$(CUTLASS_INC) -I$(CUTLASS_HOME)/tools/util/include/
+INCS+=-I$(CUTLASS_HOME)/tools/util/include
 
 EXTRA_FLAGS?=
 
