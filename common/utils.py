@@ -17,8 +17,9 @@ import math
 
 cutlass = os.environ.get('CUTLASS_HOME', '/nobackup/medavies/cutlass')
 
-def make_ext(files : list[str], verbose=False):
-    return load('testmlp_cuda',
+def make_ext(name, files : list[str], verbose=True):
+    return load(
+        name,
         files,
         extra_include_paths=['./common', f'{cutlass}/include', f'{cutlass}/tools/util/include'],
         extra_cuda_cflags=['-O3', '--expt-relaxed-constexpr', '-std=c++17', '-Xptxas="-v"'],
