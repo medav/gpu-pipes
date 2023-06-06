@@ -10,7 +10,7 @@ const size_t DD = 128;
 
 
 int main() {
-    const size_t NI = 1000;
+    const size_t NI = 1;
     const size_t m = MM;
 
     half * x_dev = nullptr;
@@ -52,7 +52,7 @@ int main() {
                 y2_dev
             );
 
-            bulksync_gemm<MM, DD, DD, true>(
+            bulksync_gemm<MM, DD, DD, false>(
                 y2_dev,
                 w3_dev,
                 b3_dev,
