@@ -57,7 +57,7 @@ void testmlp_out(
         (half *)y2.data_ptr<at::Half>()
     );
 
-    bulksync_gemm<MM, 128, 128, true>(
+    bulksync_gemm<MM, 128, 128, false>(
         (half *)y2.data_ptr<at::Half>(),
         (half *)w3.data_ptr<at::Half>(),
         (half *)b3.data_ptr<at::Half>(),
