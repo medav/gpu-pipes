@@ -112,7 +112,7 @@ void benchmark_linear(size_t NI, size_t M, size_t N, size_t K) {
     const size_t WK = WarpShape::kK;
 
     printf(
-        "[%lu, %lu, %lu][%lu, %lu, %lu][%lu, %lu, %lu][%lu] Avg latency: %f ms, %f GFLOPS\n",
+        "[%lu, %lu, %lu][%3lu, %3lu, %3lu][%3lu, %3lu, %3lu][%lu] Avg latency: %f ms, %f GFLOPS\n",
         M, N, K, TM, TN, TK, WM, WN, WK, (size_t)RELU,
         time_ms / (float)NI,
         NI * M * N * K * 2.0f / (time_ms * 1e-3f) / 1e9f);
@@ -144,6 +144,10 @@ int main(int argc, char * argv[]) {
 
     const bool RELU = std::atoi(argv[11]);
 
+    // Notes:
+    // * Minimum Warp K supported by cutlass = 32
+    // * It appears TB K must equal Warp K (Not sure if always the case)
+
     SUPPORT_SHAPE(/* TB: */ 128, 128, 32, /* Warp: */ 32,  32,  32, false);
     SUPPORT_SHAPE(/* TB: */ 128, 128, 32, /* Warp: */ 32,  32,  32, true);
     SUPPORT_SHAPE(/* TB: */ 128, 128, 32, /* Warp: */ 64,  32,  32, false);
@@ -162,6 +166,25 @@ int main(int argc, char * argv[]) {
     SUPPORT_SHAPE(/* TB: */ 128, 128, 32, /* Warp: */ 64,  128, 32, true);
     SUPPORT_SHAPE(/* TB: */ 128, 128, 32, /* Warp: */ 128, 128, 32, false);
     SUPPORT_SHAPE(/* TB: */ 128, 128, 32, /* Warp: */ 128, 128, 32, true);
+
+    SUPPORT_SHAPE(/* TB: */ 128, 128, 64, /* Warp: */ 32,  32,  64, false);
+    SUPPORT_SHAPE(/* TB: */ 128, 128, 64, /* Warp: */ 32,  32,  64, true);
+    SUPPORT_SHAPE(/* TB: */ 128, 128, 64, /* Warp: */ 64,  32,  64, false);
+    SUPPORT_SHAPE(/* TB: */ 128, 128, 64, /* Warp: */ 64,  32,  64, true);
+    SUPPORT_SHAPE(/* TB: */ 128, 128, 64, /* Warp: */ 128, 32,  64, false);
+    SUPPORT_SHAPE(/* TB: */ 128, 128, 64, /* Warp: */ 128, 32,  64, true);
+    SUPPORT_SHAPE(/* TB: */ 128, 128, 64, /* Warp: */ 32,  64,  64, false);
+    SUPPORT_SHAPE(/* TB: */ 128, 128, 64, /* Warp: */ 32,  64,  64, true);
+    SUPPORT_SHAPE(/* TB: */ 128, 128, 64, /* Warp: */ 64,  64,  64, false);
+    SUPPORT_SHAPE(/* TB: */ 128, 128, 64, /* Warp: */ 64,  64,  64, true);
+    SUPPORT_SHAPE(/* TB: */ 128, 128, 64, /* Warp: */ 128, 64,  64, false);
+    SUPPORT_SHAPE(/* TB: */ 128, 128, 64, /* Warp: */ 128, 64,  64, true);
+    SUPPORT_SHAPE(/* TB: */ 128, 128, 64, /* Warp: */ 32,  128, 64, false);
+    SUPPORT_SHAPE(/* TB: */ 128, 128, 64, /* Warp: */ 32,  128, 64, true);
+    SUPPORT_SHAPE(/* TB: */ 128, 128, 64, /* Warp: */ 64,  128, 64, false);
+    SUPPORT_SHAPE(/* TB: */ 128, 128, 64, /* Warp: */ 64,  128, 64, true);
+    SUPPORT_SHAPE(/* TB: */ 128, 128, 64, /* Warp: */ 128, 128, 64, false);
+    SUPPORT_SHAPE(/* TB: */ 128, 128, 64, /* Warp: */ 128, 128, 64, true);
 
     return 0;
 }
