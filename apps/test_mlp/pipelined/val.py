@@ -31,7 +31,7 @@ def test_correctness():
     x = torch.randn(M, 128, dtype=torch.float16, device='cuda')
 
     y_ref = net(x)
-    y_act = ext.testmlp_cuda.testmlp(
+    y_act = ext.cuda_ext.testmlp(
         x,
         net.model[0][0].weight.t().contiguous(), net.model[0][0].bias,
         net.model[1][0].weight.t().contiguous(), net.model[1][0].bias,
