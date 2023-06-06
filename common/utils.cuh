@@ -34,6 +34,11 @@ float cuda_time_kernel_ms(std::function<void(void)> func) {
     return time_ms;
 }
 
+void cuda_check_kernel_call(std::function<void(void)> func) {
+    func();
+    cudaErrCheck(cudaGetLastError());
+}
+
 __global__ void float_to_half(half * dst, float * src, size_t N) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < N) dst[idx] = __float2half(src[idx]);
