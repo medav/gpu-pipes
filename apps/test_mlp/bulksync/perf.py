@@ -22,7 +22,7 @@ def test_performance(NI=1000):
     flops = M * (128 * 128 + 128 * 128 + 128 * 128) * 2
 
     utils.benchmark(
-        ext.testmlp_cuda.testmlp_out,
+        ext.cuda_ext.testmlp_out,
         x,
         w1, b1,
         w2, b2,
