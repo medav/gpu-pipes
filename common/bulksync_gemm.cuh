@@ -31,7 +31,7 @@ cudaError_t bulksync_gemm(
             cutlass::arch::OpClassWmmaTensorOp,
             cutlass::arch::Sm80,
             cutlass::gemm::GemmShape<128, 128, 32>,
-            cutlass::gemm::GemmShape<64, 64, 32>,
+            cutlass::gemm::GemmShape<32, 64, 32>,
             cutlass::gemm::GemmShape<16, 16, 16>,
             cutlass::epilogue::thread::LinearCombinationRelu<
                 cutlass::half_t,
