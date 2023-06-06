@@ -24,3 +24,16 @@ def make_ext(files : list[str], verbose=False):
         extra_cuda_cflags=['-O3', '--expt-relaxed-constexpr', '-std=c++17', '-Xptxas="-v"'],
         extra_ldflags=['-O3', f'-L{cutlass}/build/tools/library', '-lcutlass'],
         verbose=verbose)
+
+def benchmark(f, *args, flops=1, NI=1000):
+    print('======== Performance ========')
+    torch.cuda.synchronize()
+
+    t0 = time.perf_counter()
+    for _ in range(NI): f(*args)
+    torch.cuda.synchronize()
+    t1 = time.perf_counter()
+
+    tt = t1 - t0
+
+    print(f'Avg Latency: {tt / NI:.3f} s, {flops * NI / tt / 1e9:.3f} GFLOPS')
