@@ -5,11 +5,10 @@
 
 #include "cutlass/cutlass.h"
 #include "cutlass/gemm/device/gemm.h"
+#include "cutlass/util/host_tensor.h"
 
 #include "utils.cuh"
 #include "refgemm.cuh"
-
-using ThreadblockShape = cutlass::gemm::GemmShape<128, 128, 32>;
 
 template<size_t MM, size_t NN, size_t KK, bool RELU=false>
 cudaError_t bulksync_gemm(
@@ -19,6 +18,8 @@ cudaError_t bulksync_gemm(
     half * y
 ) {
     using RowMajor = cutlass::layout::RowMajor;
+    using SwizzleThreadBlock = cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>;
+constexpr int NumStages = 2;
 
     cutlass::Status status;
 
@@ -39,10 +40,12 @@ cudaError_t bulksync_gemm(
                 cutlass::half_t,
                 cutlass::half_t,
                 cutlass::epilogue::thread::ScaleType::NoBetaScaling
-            >
+            >,
+            SwizzleThreadBlock,
+            NumStages
         >;
 
-        CutlassGemm gemm_operator;
+        CutlassGemm gemm_op;
 
         CutlassGemm::Arguments args(
             {(int)MM, (int)NN, (int)KK},
@@ -50,11 +53,14 @@ cudaError_t bulksync_gemm(
             {(cutlass::half_t *)w, (int)NN},
             {(cutlass::half_t *)b, (int)0},
             {(cutlass::half_t *)y, (int)NN},
-            {cutlass::half_t(1.0f), cutlass::half_t(0.0f), cutlass::half_t(0.0f)}
+            {}
 
         );
 
-        status = gemm_operator(args);
+        size_t workspace_size = CutlassGemm::get_workspace_size(args);
+        cutlass::device_memory::allocation<uint8_t> workspace(workspace_size);
+        status = gemm_op.initialize(args, workspace.get());
+        status = gemm_op(args);
     }
     else {
 
@@ -66,17 +72,20 @@ cudaError_t bulksync_gemm(
             cutlass::arch::OpClassTensorOp,
             cutlass::arch::Sm80,
             cutlass::gemm::GemmShape<128, 128, 32>,
-            cutlass::gemm::GemmShape<64, 64, 32>,
+            cutlass::gemm::GemmShape<32, 64, 32>,
             cutlass::gemm::GemmShape<16, 8, 16>,
             cutlass::epilogue::thread::LinearCombination<
                 cutlass::half_t,
                 128 / cutlass::sizeof_bits<cutlass::half_t>::value,
                 cutlass::half_t,
-                cutlass::half_t
-            >
+                cutlass::half_t,
+                cutlass::epilogue::thread::ScaleType::NoBetaScaling
+            >,
+            SwizzleThreadBlock,
+            NumStages
         >;
 
-        CutlassGemm gemm_operator;
+        CutlassGemm gemm_op;
 
         CutlassGemm::Arguments args(
             {(int)MM, (int)NN, (int)KK},
@@ -84,10 +93,13 @@ cudaError_t bulksync_gemm(
             {(cutlass::half_t *)w, (int)NN},
             {(cutlass::half_t *)b, (int)0},
             {(cutlass::half_t *)y, (int)NN},
-            {cutlass::half_t(1.0f), cutlass::half_t(0.0f)}
+            {}
         );
 
-        status = gemm_operator(args);
+        size_t workspace_size = CutlassGemm::get_workspace_size(args);
+        cutlass::device_memory::allocation<uint8_t> workspace(workspace_size);
+        status = gemm_op.initialize(args, workspace.get());
+        status = gemm_op(args);
     }
 
     if (status != cutlass::Status::kSuccess) {
