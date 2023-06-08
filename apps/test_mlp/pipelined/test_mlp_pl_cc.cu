@@ -24,8 +24,9 @@ inline void configure_smem_once() {
 }
 
 
-int main() {
-    const size_t NI = 1000;
+int main(int argc, char * argv[]) {
+    const size_t NI = argc > 1 ? std::atoi(argv[1]) : 1000;
+    printf("NI: %zu\n", NI);
     const size_t m = 1280 * 1024;
 
     half * x_dev = nullptr;
