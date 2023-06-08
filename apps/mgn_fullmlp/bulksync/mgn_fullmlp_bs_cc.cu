@@ -2,7 +2,7 @@
 
 #include <cuda_fp16.h>
 
-#include "test_mlp_bs.cuh"
+#include "mgn_fullmlp_bs.cuh"
 #include "bulksync_gemm.cuh"
 #include "utils.cuh"
 
