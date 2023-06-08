@@ -126,6 +126,25 @@ __global__ void device_layer_norm(
     layer_norm<D, NWARPS>(in_ptr, gamma, beta, out_ptr, MBLK);
 }
 
+template<int D, int NWARPS=4, int MBLK=128>
+void host_layer_norm(
+    const size_t M,
+    const half * x,
+    const half * gamma,
+    const half * beta,
+    half * out
+) {
+    dim3 grid(M / MBLK);
+    dim3 block(32, NWARPS);
+
+    device_layer_norm<D, NWARPS><<<grid, block>>>(
+        (half *)x,
+        (half *)gamma,
+        (half *)beta,
+        (half *)out,
+        MBLK
+    );
+}
 
 
 #undef WARP_REDUCE
