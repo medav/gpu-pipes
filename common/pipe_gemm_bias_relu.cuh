@@ -29,6 +29,13 @@ struct PipeGemmBiasRelu {
     using ThreadBlockShape = cutlass::gemm::GemmShape<ProblemSize::kM, ProblemSize::kN, 32>;
     using WarpShape = cutlass::gemm::GemmShape<32, 64, 32>;
 
+    using EpilogueOp = cutlass::epilogue::thread::LinearCombinationRelu<
+        cutlass::half_t,
+        128 / cutlass::sizeof_bits<cutlass::half_t>::value,
+        cutlass::half_t,
+        cutlass::half_t,
+        cutlass::epilogue::thread::ScaleType::NoBetaScaling>;
+
     using Kernel = typename cutlass::gemm::kernel::DefaultGemmUniversal<
         cutlass::half_t, cutlass::layout::RowMajor, cutlass::ComplexTransform::kNone, 8,    // transposed B operand
         cutlass::half_t, cutlass::layout::RowMajor, cutlass::ComplexTransform::kNone, 8,    // transposed A operand
@@ -39,32 +46,11 @@ struct PipeGemmBiasRelu {
         ThreadBlockShape, // threadblock tile
         WarpShape,   // warp tile
         cutlass::gemm::GemmShape<16, 8, 16>,    // instruction tile
-        cutlass::epilogue::thread::LinearCombination<
-            cutlass::half_t,
-            8,
-            cutlass::half_t,
-            cutlass::half_t
-        >,
+        EpilogueOp,
         cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<8>,
         3,
         cutlass::arch::OpMultiplyAdd
     >::DefaultGemmKernel;
-
-    // Define the epilogue operation as LinearCombinationRelu. This is approximately equal to
-    //
-    //    d_ij = max(0, alpha * sum_k(a_ik * b_kj) + c_ij )
-    //
-    using EpilogueOp = cutlass::epilogue::thread::LinearCombinationRelu<
-        cutlass::half_t,                                        // <- data type of output matrix
-        128 / cutlass::sizeof_bits<cutlass::half_t>::value,     // <- this is the number of elements per
-                                                            // vectorized memory access. For half
-                                                            // precision, it's 8 elements. This becomes
-                                                            // the vector width of math instructions in
-                                                            // epilogue too
-        cutlass::half_t,                                   // <- data type of accumulator
-        cutlass::half_t,                               // <- data type for alpha in linear combination function
-        cutlass::epilogue::thread::ScaleType::NoBetaScaling>; // <- alpha x C + bias
-
 
     using Mma = typename Kernel::Mma;
     using IteratorA = typename Kernel::Mma::IteratorA;
@@ -190,11 +176,7 @@ __device__ void pipe_gemm_bias_relu(
         );
 
         typename Types::Epilogue::OutputOp output_op(
-            typename Types::Epilogue::OutputOp::Params(
-                (cutlass::half_t)1.0f,
-                (cutlass::half_t)0.0f,
-                (cutlass::half_t)0.0f
-            )
+            typename Types::Epilogue::OutputOp::Params({})
         );
 
         epilogue(output_op, iterator_C, accum, iterator_Bias);
