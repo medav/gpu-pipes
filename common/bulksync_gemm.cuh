@@ -13,9 +13,9 @@ using ThreadblockShape = cutlass::gemm::GemmShape<128, 128, 32>;
 
 template<size_t MM, size_t NN, size_t KK, bool RELU=false>
 cudaError_t bulksync_gemm(
-    half * x,
-    half * w,
-    half * b,
+    const half * x,
+    const half * w,
+    const half * b,
     half * y
 ) {
     using RowMajor = cutlass::layout::RowMajor;

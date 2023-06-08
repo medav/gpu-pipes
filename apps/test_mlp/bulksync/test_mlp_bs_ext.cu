@@ -5,15 +5,13 @@
 
 #include <cuda_fp16.h>
 
+#include "test_mlp_bs.cuh"
 #include "bulksync_gemm.cuh"
 #include "utils.cuh"
 
 #define CHECK_CUDA(x) TORCH_CHECK(x.device().is_cuda(), #x " must be a CUDA tensor")
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
 #define CHECK_INPUT(x) CHECK_CUDA(x); CHECK_CONTIGUOUS(x)
-
-
-const size_t MM = 1280 * 1024;
 
 
 void testmlp_out(
@@ -43,24 +41,16 @@ void testmlp_out(
     assert(w3.size(0) == 128 && w3.size(1) == 128 && b3.size(0) == 128);
 
 
-    bulksync_gemm<MM, 128, 128, true>(
+    testmlp_bs<MM, DD>(
         (half *)x.data_ptr<at::Half>(),
         (half *)w1.data_ptr<at::Half>(),
         (half *)b1.data_ptr<at::Half>(),
-        (half *)y1.data_ptr<at::Half>()
-    );
-
-    bulksync_gemm<MM, 128, 128, true>(
-        (half *)y1.data_ptr<at::Half>(),
         (half *)w2.data_ptr<at::Half>(),
         (half *)b2.data_ptr<at::Half>(),
-        (half *)y2.data_ptr<at::Half>()
-    );
-
-    bulksync_gemm<MM, 128, 128, false>(
-        (half *)y2.data_ptr<at::Half>(),
         (half *)w3.data_ptr<at::Half>(),
         (half *)b3.data_ptr<at::Half>(),
+        (half *)y1.data_ptr<at::Half>(),
+        (half *)y2.data_ptr<at::Half>(),
         (half *)out.data_ptr<at::Half>()
     );
 }
