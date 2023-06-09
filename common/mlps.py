@@ -1,6 +1,6 @@
 import torch
 
-class TorchMlp(torch.nn.Module):
+class MgnMlp(torch.nn.Module):
     def __init__(self, input_size : int, widths : list[int], layernorm=True):
         super().__init__()
         widths = [input_size] + widths
