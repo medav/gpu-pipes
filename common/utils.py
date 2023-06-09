@@ -37,4 +37,4 @@ def benchmark(f, *args, flops=1, NI=1000):
 
     tt = t1 - t0
 
-    print(f'Avg Latency: {tt / NI:.3f} s, {flops * NI / tt / 1e9:.3f} GFLOPS')
+    print(f'Avg Latency: {1000 * tt / NI:.3f} ms, {flops * NI / tt / 1e9:.3f} GFLOPS')
