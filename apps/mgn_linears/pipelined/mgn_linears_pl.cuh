@@ -29,9 +29,9 @@ struct QueueEntry2D {
 
 struct MgnLinears {
     static const int d = 128;
-    static const int n_rows = 40;
+    static const int n_rows = 128;
 
-    static const int n_mlp_cols = 5;
+    static const int n_mlp_cols = 3;
     static const int n_cols = n_mlp_cols;
 
     static const int mblk = 128;
@@ -52,8 +52,8 @@ struct MgnLinears {
     using Queue = MpmcRingQueue<QEntry, qlen, 1, 1>;
 
     struct Queues {
-        Queue q01;
-        Queue q12;
+        // Queue q01;
+        // Queue q12;
         Queue q23;
         Queue q34;
     };
@@ -61,12 +61,13 @@ struct MgnLinears {
     Queues * qs;
 };
 
+using BlockShape384 = cutlass::gemm::GemmShape<MgnLinears::mblk, 128, 384>;
 using BlockShape = cutlass::gemm::GemmShape<MgnLinears::mblk, 128, 128>;
 using LayerNormBlock = LayerNormShape<MgnLinears::mblk, 128>;
 
 
 const size_t max_smem = std::max({
-    sizeof(typename PipeGemm<BlockShape>::SmemBuffers),
+    sizeof(typename PipeGemmBiasRelu<BlockShape384>::SmemBuffers),
     sizeof(typename PipeGemmBias<BlockShape>::SmemBuffers),
     sizeof(typename PipeGemmBiasRelu<BlockShape>::SmemBuffers),
     sizeof(LayerNormSmemBuffers<128, num_warps>)
@@ -74,7 +75,7 @@ const size_t max_smem = std::max({
 
 
 __device__ void mlp0_sm0(MgnLinears& prob, int row) {
-    if (threadIdx.y >= PipeGemm<BlockShape>::num_warps) return;
+    if (threadIdx.y >= PipeGemm<BlockShape384>::num_warps) return;
     const int num_iters = prob.m / MgnLinears::mblk / MgnLinears::n_rows;
 
     MemoryReader ir(
@@ -83,17 +84,18 @@ __device__ void mlp0_sm0(MgnLinears& prob, int row) {
         MgnLinears::d * 3);
 
     NullReader ar;
-    QueueWriter ow(prob.qs[row].q01);
+    QueueWriter ow(prob.qs[row].q23);
 
-    pipe_gemm<BlockShape>(
+    pipe_gemm_bias_relu<BlockShape384>(
         {&prob.w1[0], MgnLinears::d},
+        {&prob.b1[0], 0},
         ir,
         ar,
         ow,
         num_iters);
 }
 
-
+#if 0
 __device__ void mlp0_sm1(MgnLinears& prob, int row) {
     if (threadIdx.y >= PipeGemm<BlockShape>::num_warps) return;
     const int num_iters = prob.m / MgnLinears::mblk / MgnLinears::n_rows;
@@ -134,6 +136,7 @@ __device__ void mlp0_sm2(MgnLinears& prob, int row) {
         ow,
         num_iters);
 }
+#endif
 
 __device__ void mlp1_sm0(MgnLinears& prob, int row) {
     if (threadIdx.y >= PipeGemm<BlockShape>::num_warps) return;
@@ -203,10 +206,10 @@ __global__ void linears_device(
 
     switch (pipe_col) {
         case 0: mlp0_sm0(prob, pipe_row); break;
-        case 1: mlp0_sm1(prob, pipe_row); break;
-        case 2: mlp0_sm2(prob, pipe_row); break;
-        case 3: mlp1_sm0(prob, pipe_row); break;
-        case 4: mlp2_sm0(prob, pipe_row); break;
+        // case 1: mlp0_sm1(prob, pipe_row); break;
+        // case 2: mlp0_sm2(prob, pipe_row); break;
+        case 1: mlp1_sm0(prob, pipe_row); break;
+        case 2: mlp2_sm0(prob, pipe_row); break;
         default: return;
     }
 }
