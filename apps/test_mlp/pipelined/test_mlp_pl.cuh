@@ -28,7 +28,7 @@ struct QueueEntry2D {
 
 struct TestMlp {
     static const int d = 128;
-    static const int n_rows = 72;
+    static const int n_rows = 80;
     static const int n_cols = 3;
 
     static const int mblk = 128;
