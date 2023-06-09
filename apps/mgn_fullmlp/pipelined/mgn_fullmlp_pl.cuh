@@ -31,7 +31,7 @@ struct MgnFullMlp {
     static const int d = 128;
     static const int n_rows = 20;
 
-    static const int n_mlp_cols = 5;
+    static const int n_mlp_cols = 3;
     static const int n_ln_cols = 5;
     static const int n_cols = n_mlp_cols + n_ln_cols;
 
@@ -57,8 +57,8 @@ struct MgnFullMlp {
     using LayerNormQueue = MpmcRingQueue<QEntry, ln_qlen, 1, 1>;
 
     struct Queues {
-        Queue q01;
-        Queue q12;
+        // Queue q01;
+        // Queue q12;
         Queue q23;
         Queue q34;
         LayerNormQueue lnq;
@@ -67,12 +67,13 @@ struct MgnFullMlp {
     Queues * qs;
 };
 
+using BlockShape384 = cutlass::gemm::GemmShape<MgnFullMlp::mblk, 128, 384>;
 using BlockShape = cutlass::gemm::GemmShape<MgnFullMlp::mblk, 128, 128>;
 using LayerNormBlock = LayerNormShape<MgnFullMlp::mblk, 128>;
 
 
 const size_t max_smem = std::max({
-    sizeof(typename PipeGemm<BlockShape>::SmemBuffers),
+    sizeof(typename PipeGemmBiasRelu<BlockShape384>::SmemBuffers),
     sizeof(typename PipeGemmBias<BlockShape>::SmemBuffers),
     sizeof(typename PipeGemmBiasRelu<BlockShape>::SmemBuffers),
     sizeof(LayerNormSmemBuffers<128, num_warps>)
@@ -80,7 +81,7 @@ const size_t max_smem = std::max({
 
 
 __device__ void mlp0_sm0(MgnFullMlp& prob, int row) {
-    if (threadIdx.y >= PipeGemm<BlockShape>::num_warps) return;
+    if (threadIdx.y >= PipeGemm<BlockShape384>::num_warps) return;
     const int num_iters = prob.m / MgnFullMlp::mblk / MgnFullMlp::n_rows;
 
     MemoryReader ir(
@@ -89,17 +90,18 @@ __device__ void mlp0_sm0(MgnFullMlp& prob, int row) {
         MgnFullMlp::d * 3);
 
     NullReader ar;
-    QueueWriter ow(prob.qs[row].q01);
+    QueueWriter ow(prob.qs[row].q23);
 
-    pipe_gemm<BlockShape>(
+    pipe_gemm_bias_relu<BlockShape384>(
         {&prob.w1[0], MgnFullMlp::d},
+        {&prob.b1[0], 0},
         ir,
         ar,
         ow,
         num_iters);
 }
 
-
+#if 0
 __device__ void mlp0_sm1(MgnFullMlp& prob, int row) {
     if (threadIdx.y >= PipeGemm<BlockShape>::num_warps) return;
     const int num_iters = prob.m / MgnFullMlp::mblk / MgnFullMlp::n_rows;
@@ -140,6 +142,7 @@ __device__ void mlp0_sm2(MgnFullMlp& prob, int row) {
         ow,
         num_iters);
 }
+#endif
 
 __device__ void mlp1_sm0(MgnFullMlp& prob, int row) {
     if (threadIdx.y >= PipeGemm<BlockShape>::num_warps) return;
@@ -236,10 +239,10 @@ __global__ void fullmlp_device(
 
     switch (pipe_col) {
         case 0: mlp0_sm0(prob, pipe_row); break;
-        case 1: mlp0_sm1(prob, pipe_row); break;
-        case 2: mlp0_sm2(prob, pipe_row); break;
-        case 3: mlp1_sm0(prob, pipe_row); break;
-        case 4: mlp2_sm0(prob, pipe_row); break;
+        // case 1: mlp0_sm1(prob, pipe_row); break;
+        // case 2: mlp0_sm2(prob, pipe_row); break;
+        case 1: mlp1_sm0(prob, pipe_row); break;
+        case 2: mlp2_sm0(prob, pipe_row); break;
         default:
             pipe_col -= MgnFullMlp::n_mlp_cols;
 
