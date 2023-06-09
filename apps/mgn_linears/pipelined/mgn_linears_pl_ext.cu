@@ -44,6 +44,8 @@ void mgn_linears_out(
     assert(w2.size(0) == 128 && w2.size(1) == 128 && b2.size(0) == 128);
     assert(w3.size(0) == 128 && w3.size(1) == 128 && b3.size(0) == 128);
 
+    assert(x.size(0) % MgnLinears::n_rows == 0);
+
     dim3 grid(MgnLinears::n_cols, MgnLinears::n_rows);
     dim3 block(32, num_warps);
 

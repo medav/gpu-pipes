@@ -47,6 +47,8 @@ void mgn_fullmlp_out(
     assert(w3.size(0) == 128 && w3.size(1) == 128 && b3.size(0) == 128);
     assert(gamma.size(0) == 128 && beta.size(0) == 128);
 
+    assert(x.size(0) % MgnFullMlp::n_rows == 0);
+
     dim3 grid(MgnFullMlp::n_cols, MgnFullMlp::n_rows);
     dim3 block(32, num_warps);
 
