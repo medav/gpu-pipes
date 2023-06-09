@@ -44,5 +44,8 @@ def test_correctness():
     print('L2 error: ', torch.norm(y_ref - y_act))
     print('max error: ', max_error)
 
+    print(y_ref)
+    print(y_act)
+
 
 if __name__ == '__main__': test_correctness()
