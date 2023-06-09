@@ -19,3 +19,17 @@ class MgnMlp(torch.nn.Module):
 
     def forward(self, x): return self.model(x)
 
+
+class DlrmMlp(torch.nn.Module):
+    def __init__(self, widths : list[int], sigmoid_i=None):
+        super().__init__()
+        modules = []
+        for i in range(len(widths) - 1):
+            modules.append(torch.nn.Linear(widths[i], widths[i + 1]))
+
+            if i == sigmoid_i: modules.append(torch.nn.Sigmoid())
+            else: modules.append(torch.nn.ReLU())
+
+        self.model = torch.nn.Sequential(*modules)
+
+    def forward(self, x): return self.model(x)
