@@ -168,7 +168,10 @@ __device__ void pipe_gemm(
         );
 
         typename Types::Epilogue::OutputOp output_op(
-            typename Types::Epilogue::OutputOp::Params({})
+            typename Types::Epilogue::OutputOp::Params(
+                cutlass::half_t(1.0f),
+                cutlass::half_t(0.0f)
+            )
         );
 
         epilogue(output_op, iterator_C, accum);
