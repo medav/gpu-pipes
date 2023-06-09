@@ -1,14 +1,14 @@
 import os
 import time
 import torch
-from common.mlps import TorchMlp
+from common.mlps import MgnMlp
 from . import ext
 
 def test_correctness():
     M = 1280 * 1024
     print('======== Correctness ========')
     torch.manual_seed(0)
-    net = TorchMlp(128, [128, 128, 128], layernorm=False).eval().half().cuda()
+    net = MgnMlp(128, [128, 128, 128], layernorm=False).eval().half().cuda()
     x = torch.randn(M, 128, dtype=torch.float16, device='cuda')
 
     y_ref = net(x)
