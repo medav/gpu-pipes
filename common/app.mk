@@ -13,6 +13,8 @@ INCS+=-I$(CUTLASS_HOME)/tools/util/include
 
 EXTRA_FLAGS?=
 
+NI?=
+
 .PHONY: default run objdump gdb
 
 default: $(APP).elf
@@ -37,7 +39,7 @@ clean:
 	rm -f $(APP).elf
 
 run: $(APP).elf
-	LD_LIBRARY_PATH=$(CUTLASS_LIB) ./$(APP).elf
+	LD_LIBRARY_PATH=$(CUTLASS_LIB) ./$(APP).elf $(NI)
 
 gdb: $(APP).elf
 	LD_LIBRARY_PATH=$(CUTLASS_LIB) /usr/local/cuda/bin/cuda-gdb ./$(APP).elf
