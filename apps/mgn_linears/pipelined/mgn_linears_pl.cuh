@@ -9,14 +9,6 @@
 
 #include "utils.cuh"
 
-using ProblemShape = cutlass::gemm::GemmShape<128, 128, 128>;
-
-const size_t num_warps = std::max({
-    PipeGemm<ProblemShape>::num_warps,
-    PipeGemmBias<ProblemShape>::num_warps,
-    PipeGemmBiasRelu<ProblemShape>::num_warps
-});
-
 template<typename DT, size_t M, size_t D>
 struct QueueEntry2D {
     using Element = DT;
@@ -63,19 +55,26 @@ struct MgnLinears {
 
 using BlockShape384 = cutlass::gemm::GemmShape<MgnLinears::mblk, 128, 384>;
 using BlockShape = cutlass::gemm::GemmShape<MgnLinears::mblk, 128, 128>;
+using WarpShape = cutlass::gemm::GemmShape<32, 64, 32>;
 using LayerNormBlock = LayerNormShape<MgnLinears::mblk, 128>;
 
 
+const size_t num_warps = std::max({
+    PipeGemm<BlockShape, WarpShape>::num_warps,
+    PipeGemmBias<BlockShape, WarpShape>::num_warps,
+    PipeGemmBiasRelu<BlockShape, WarpShape>::num_warps
+});
+
+
 const size_t max_smem = std::max({
-    sizeof(typename PipeGemmBiasRelu<BlockShape384>::SmemBuffers),
-    sizeof(typename PipeGemmBias<BlockShape>::SmemBuffers),
-    sizeof(typename PipeGemmBiasRelu<BlockShape>::SmemBuffers),
+    sizeof(typename PipeGemmBiasRelu<BlockShape384, WarpShape>::SmemBuffers),
+    sizeof(typename PipeGemmBias<BlockShape, WarpShape>::SmemBuffers),
+    sizeof(typename PipeGemmBiasRelu<BlockShape, WarpShape>::SmemBuffers),
     sizeof(LayerNormSmemBuffers<128, num_warps>)
 });
 
 
 __device__ void mlp0_sm0(MgnLinears& prob, int row) {
-    if (threadIdx.y >= PipeGemm<BlockShape384>::num_warps) return;
     const int num_iters = prob.m / MgnLinears::mblk / MgnLinears::n_rows;
 
     MemoryReader ir(
@@ -86,7 +85,7 @@ __device__ void mlp0_sm0(MgnLinears& prob, int row) {
     NullReader ar;
     QueueWriter ow(prob.qs[row].q23);
 
-    pipe_gemm_bias_relu<BlockShape384>(
+    pipe_gemm_bias_relu<BlockShape384, WarpShape>(
         {&prob.w1[0], MgnLinears::d},
         {&prob.b1[0], 0},
         ir,
@@ -139,14 +138,13 @@ __device__ void mlp0_sm2(MgnLinears& prob, int row) {
 #endif
 
 __device__ void mlp1_sm0(MgnLinears& prob, int row) {
-    if (threadIdx.y >= PipeGemm<BlockShape>::num_warps) return;
     const int num_iters = prob.m / MgnLinears::mblk / MgnLinears::n_rows;
 
     QueueReader ir(prob.qs[row].q23);
     NullReader ar;
     QueueWriter ow(prob.qs[row].q34);
 
-    pipe_gemm_bias_relu<BlockShape>(
+    pipe_gemm_bias_relu<BlockShape, WarpShape>(
         {&prob.w2[0], MgnLinears::d},
         {&prob.b2[0], 0},
         ir,
@@ -156,7 +154,6 @@ __device__ void mlp1_sm0(MgnLinears& prob, int row) {
 }
 
 __device__ void mlp2_sm0(MgnLinears& prob, int row) {
-    if (threadIdx.y >= PipeGemm<BlockShape>::num_warps) return;
     const int num_iters = prob.m / MgnLinears::mblk / MgnLinears::n_rows;
 
     QueueReader ir(prob.qs[row].q34);
@@ -166,7 +163,7 @@ __device__ void mlp2_sm0(MgnLinears& prob, int row) {
         MgnLinears::mblk * MgnLinears::d,
         MgnLinears::d);
 
-    pipe_gemm_bias<BlockShape>(
+    pipe_gemm_bias<BlockShape, WarpShape>(
         {&prob.w3[0], MgnLinears::d},
         {&prob.b3[0], 0},
         ir,
