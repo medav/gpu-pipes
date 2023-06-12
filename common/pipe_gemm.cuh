@@ -24,10 +24,10 @@
 #include "common.cuh"
 #include "utils.cuh"
 
-template<typename ProblemSize>
+template<typename ProblemSize, typename WarpShape_>
 struct PipeGemm {
     using ThreadBlockShape = cutlass::gemm::GemmShape<ProblemSize::kM, ProblemSize::kN, 32>;
-    using WarpShape = cutlass::gemm::GemmShape<32, 64, 32>;
+    using WarpShape = cutlass::gemm::GemmShape<WarpShape_::kM, WarpShape_::kN, 32>;
 
     using EpilogueOp = cutlass::epilogue::thread::LinearCombination<
         cutlass::half_t,
@@ -77,6 +77,7 @@ struct PipeGemm {
 
 template<
     typename ProblemShape,
+    typename WarpShape,
     typename InputReader,
     typename AccumReader,
     typename OutputWriter>
@@ -87,7 +88,7 @@ __device__ void pipe_gemm(
     OutputWriter& ow,
     int num_iters
 ) {
-    using Types = PipeGemm<ProblemShape>;
+    using Types = PipeGemm<ProblemShape, WarpShape>;
     extern __shared__ char smem_raw[];
     typename Types::SmemBuffers * smem =
         reinterpret_cast<typename Types::SmemBuffers *>(smem_raw);
