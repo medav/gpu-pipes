@@ -24,7 +24,7 @@
 #include "common.cuh"
 #include "utils.cuh"
 
-template<typename ProblemSize, typename WarpShape_>
+template<typename ProblemSize, typename WarpShape_, int NumStages = 3>
 struct PipeGemmBiasRelu {
     using ThreadBlockShape = cutlass::gemm::GemmShape<ProblemSize::kM, ProblemSize::kN, 32>;
     using WarpShape = cutlass::gemm::GemmShape<WarpShape_::kM, WarpShape_::kN, 32>;
@@ -48,7 +48,7 @@ struct PipeGemmBiasRelu {
         cutlass::gemm::GemmShape<16, 8, 16>,    // instruction tile
         EpilogueOp,
         cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<8>,
-        3,
+        NumStages,
         cutlass::arch::OpMultiplyAdd
     >::DefaultGemmKernel;
 
@@ -78,6 +78,7 @@ struct PipeGemmBiasRelu {
 template<
     typename ProblemShape,
     typename WarpShape,
+    int NumStages = 3,
     typename InputReader,
     typename AccumReader,
     typename OutputWriter>
@@ -89,7 +90,7 @@ __device__ void pipe_gemm_bias_relu(
     OutputWriter& ow,
     int num_iters
 ) {
-    using Types = PipeGemmBiasRelu<ProblemShape, WarpShape>;
+    using Types = PipeGemmBiasRelu<ProblemShape, WarpShape, NumStages>;
     extern __shared__ char smem_raw[];
     typename Types::SmemBuffers * smem =
         reinterpret_cast<typename Types::SmemBuffers *>(smem_raw);
