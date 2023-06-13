@@ -24,7 +24,7 @@
 #include "common.cuh"
 #include "utils.cuh"
 
-template<typename ProblemSize, typename WarpShape_, int NumStages>
+template<typename ProblemSize, typename WarpShape_, int NumStages = 3>
 struct PipeGemm {
     using ThreadBlockShape = cutlass::gemm::GemmShape<ProblemSize::kM, ProblemSize::kN, 32>;
     using WarpShape = cutlass::gemm::GemmShape<WarpShape_::kM, WarpShape_::kN, 32>;
