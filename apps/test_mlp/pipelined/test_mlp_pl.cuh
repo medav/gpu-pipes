@@ -77,7 +77,7 @@ __device__ void mlp0_sm0(TestMlp& prob, int row) {
     NullReader ar;
     QueueWriter ow(prob.qs[row].q01);
 
-    pipe_gemm_bias_relu<BlockShape, WarpShape>(
+    pipe_gemm_bias_relu<BlockShape, WarpShape, 3>(
         {&prob.w1[0], TestMlp::d},
         {&prob.b1[0], TestMlp::d},
         ir,
@@ -94,7 +94,7 @@ __device__ void mlp1_sm0(TestMlp& prob, int row) {
     NullReader ar;
     QueueWriter ow(prob.qs[row].q12);
 
-    pipe_gemm_bias_relu<BlockShape, WarpShape>(
+    pipe_gemm_bias_relu<BlockShape, WarpShape, 3>(
         {&prob.w2[0], TestMlp::d},
         {&prob.b2[0], 0},
         ir,
@@ -114,7 +114,7 @@ __device__ void mlp2_sm0(TestMlp& prob, int row) {
         TestMlp::mblk * TestMlp::d,
         TestMlp::d);
 
-    pipe_gemm_bias<BlockShape, WarpShape>(
+    pipe_gemm_bias<BlockShape, WarpShape, 3>(
         {&prob.w3[0], TestMlp::d},
         {&prob.b3[0], 0},
         ir,
