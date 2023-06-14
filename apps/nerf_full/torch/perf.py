@@ -24,7 +24,7 @@ def test_performance(NI=1000):
         128 * 280 +
         3 * 128 +
         1 * 256
-    )
+    ) * 2
 
     utils.benchmark(net, x, d, flops=flops)
 
