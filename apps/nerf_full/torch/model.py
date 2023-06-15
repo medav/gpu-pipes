@@ -5,13 +5,15 @@ import torch
 class Nerf(torch.nn.Module):
     def __init__(
         self,
-        in_x_ch : int = 60,        # Num features for position (x)
-        in_d_ch : int = 24,        # Num features for direction (d)
-        out_ch : int = 4,          # Num features for output
-        hidden_dim : int = 256,    # Num features for hidden layers
-        num_layers : int = 8,      # Num hidden layers,
-        skip : int = 4,            # Which layer has skip connection
-        use_viewdirs : bool = True # Use viewdirs as input
+        in_x_ch : int = 60,         # Num features for position (x)
+        in_d_ch : int = 24,         # Num features for direction (d)
+        out_ch : int = 4,           # Num features for output
+        hidden_dim : int = 256,     # Num features for hidden layers
+        num_layers : int = 8,       # Num hidden layers,
+        skip : int = 4,             # Which layer has skip connection
+        use_viewdirs : bool = True, # Use viewdirs as input
+        radiance_dim : int = 1,     # Num features for radiance
+        rgb_dim : int = 3,          # Num features for rgb
     ):
         super().__init__()
 
@@ -36,16 +38,14 @@ class Nerf(torch.nn.Module):
         self.use_viewdirs = use_viewdirs
 
         if use_viewdirs:
-            # N.B. Set out chans to 16 to accomodate min gemm sizes of cutlass
-            self.alpha = torch.nn.Linear(hidden_dim, 16)
+            self.alpha = torch.nn.Linear(hidden_dim, radiance_dim)
             self.bottleneck = torch.nn.Linear(hidden_dim, 256)
 
             self.rgb = torch.nn.Sequential(*[
                 torch.nn.Linear(256 + in_d_ch, hidden_dim // 2),
                 torch.nn.ReLU(),
 
-                # N.B. Set out chans to 16 to accomodate cutlass min gemm sizes
-                torch.nn.Linear(hidden_dim // 2, 16)
+                torch.nn.Linear(hidden_dim // 2, rgb_dim)
             ])
 
         else:
