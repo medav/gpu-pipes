@@ -19,6 +19,7 @@ def test_correctness():
         net.ffn[2].weight.t().contiguous(), net.ffn[2].bias,
         net.ln.weight, net.ln.bias
     )
+    torch.cuda.synchronize()
 
     print(y_ref)
     print(y_act)
