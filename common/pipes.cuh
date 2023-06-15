@@ -18,6 +18,12 @@ struct MemoryReader {
     __device__ void reset() { offset = 0; }
 };
 
+__device__ MemoryReader read_striped_input(
+    half * const base, int row, int num_iters, int MBLK, int D
+) {
+    return MemoryReader(&base[row * num_iters * MBLK * D], MBLK * D, D);
+}
+
 struct NullReader {
     __device__ TensorView read_acquire() { return {nullptr, 0}; }
     __device__ void read_release() {}
