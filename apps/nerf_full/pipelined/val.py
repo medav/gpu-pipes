@@ -2,23 +2,19 @@ import os
 import time
 import torch
 from . import ext
-
 from ..torch import model
 
-
 def test_correctness():
-    M = 65536
+    M = 2048
     print('======== Correctness ========')
     torch.manual_seed(0)
-    net = model.Nerf(64, 32, radiance_dim=16, rgb_dim=16).eval().half().cuda()
+    net = model.Nerf(64, 32, radiance_dim=64, rgb_dim=64).eval().half().cuda()
     x = torch.randn(M, 64, dtype=torch.float16, device='cuda')
     d = torch.randn(M, 32, dtype=torch.float16, device='cuda')
 
-    print(net.rgb[0].weight.t().contiguous().shape)
-
     rgb_ref, alpha_ref = net(x, d)
 
-    rgb_act, alpha_act = ext.cuda_ext.nerf(
+    rgb_act, alpha_act = ext.cuda_ext.nerf_full(
         x, d,
         net.preskip[0].weight.t().contiguous(), net.preskip[0].bias,
         net.preskip[2].weight.t().contiguous(), net.preskip[2].bias,
@@ -47,6 +43,7 @@ def test_correctness():
     # Print L2 error
     print('L2 error: ', torch.norm(rgb_ref - rgb_act))
     print('max error: ', max_error)
+
 
 
 if __name__ == '__main__': test_correctness()
