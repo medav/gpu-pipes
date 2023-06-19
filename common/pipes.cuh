@@ -83,6 +83,24 @@ struct QueueWriter {
     __device__ void reset() { seq_n = 0; q.reset(); }
 };
 
+template <typename QT>
+struct SplitQueueWriter {
+    using Queue = QT;
+    Queue& q;
+    size_t seq_n;
+    const size_t seq_off;
+    const size_t seq_stride;
+
+    __device__ SplitQueueWriter(QT& q, size_t _seq_off, size_t _seq_stride) :
+        q(q), seq_n(_seq_off), seq_off(_seq_off), seq_stride(_seq_stride) { q.reset(); }
+    __device__ TensorView write_acquire() { return q.write_wait(seq_n).as_view(); }
+    __device__ void write_release() { q.write_commit(seq_n); seq_n += seq_stride; }
+    __device__ void reset() {
+        seq_n = seq_off;
+        if (seq_off == 0) q.reset();
+    }
+};
+
 struct NullWriter {
     __device__ TensorView write_acquire() { return {nullptr, 0}; }
     __device__ void write_release() {}
