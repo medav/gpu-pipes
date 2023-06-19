@@ -1,3 +1,3 @@
 
-APP=test_mlp_bs_cc
+APP=nerf_a_bs_cc
 include ../../../common/app.mk
