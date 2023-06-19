@@ -62,6 +62,10 @@ class Parameter(Node):
     @property
     def dot_format(self): return f'label="{self.name}",shape=plain'
 
+class GenericOp(Node):
+    def __init__(self, name, inputs, shape, dtype, params=None):
+        super().__init__(name, inputs, params, shape, dtype)
+
 class Matmul(Node):
     def __init__(self, x : Node, y : Node, name='matmul'):
         super().__init__(name, [x, y], [], (*x.shape[:-1], y.shape[-1]), x.dtype)
@@ -151,12 +155,37 @@ class Graph:
         print('}')
 
     @property
-    def weight_bytes(self):
+    def total_weight_bytes(self):
         return sum(x.param_bytes for x in self.nodes.values())
 
     @property
-    def input_bytes(self):
-        tot_input_bytes = sum(x.out_bytes for x in self.nodes.values() if isinstance(x, Input))
+    def total_iact_bytes(self):
+        tot_input_bytes = 0
+
+        for n in self.nodes.values():
+            node_iact_bytes = 0
+            if not isinstance(n, Input):
+                for i in n.inputs:
+                    if not isinstance(i, Parameter):
+                        node_iact_bytes += i.out_bytes
+
+            # print(f'{n.name}: {node_iact_bytes / 2**20} MB')
+            tot_input_bytes += node_iact_bytes
+
+        return tot_input_bytes
+
+    @property
+    def total_read_bytes(self):
+        return self.total_weight_bytes + self.total_iact_bytes
+
+
+    @property
+    def pipelined_iact_bytes(self):
+        tot_input_bytes = sum(
+            x.out_bytes
+            for x in self.nodes.values()
+            if isinstance(x, Input) and not isinstance(x, Parameter)
+        )
 
         for n in self.nodes.values():
             for i in n.inputs:
@@ -164,6 +193,19 @@ class Graph:
                     tot_input_bytes += i.out_bytes
 
         return tot_input_bytes
+
+    @property
+    def pipelined_read_bytes(self):
+        return self.total_weight_bytes + self.pipelined_iact_bytes
+
+
+    @property
+    def total_write_bytes(self):
+        return sum(x.out_bytes for x in self.nodes.values() if not isinstance(x, Input))
+
+    @property
+    def total_bytes(self):
+        return self.total_read_bytes + self.total_write_bytes
 
     @property
     def output_node(self):
@@ -178,33 +220,36 @@ class Graph:
         assert len(all_nodes) == 1, all_nodes
         return all_nodes.pop()
 
+    @property
+    def pipelined_write_bytes(self):
+        return self.output_node.out_bytes
+
+    @property
+    def pipelined_bytes(self):
+        return self.pipelined_read_bytes + self.pipelined_write_bytes
+
+    @property
+    def pipelined_bytes_saved(self):
+        return self.total_bytes - self.pipelined_bytes
+
     def pipelined_analysis(self):
         print('Pipelined Analysis')
 
-        non_pipe_in_bytes = 0
-        non_pipe_param_bytes = 0
-        non_pipe_out_bytes = 0
-        non_pipe_total_bytes = 0
+        unpipe_total_bytes = self.total_bytes
 
-        for n in self.nodes.values():
-            non_pipe_in_bytes += n.in_bytes
-            non_pipe_param_bytes += n.param_bytes
-            non_pipe_out_bytes += n.out_bytes
-            non_pipe_total_bytes += n.in_bytes + n.param_bytes + n.out_bytes
-
-        print(f'+ Non-Pipelined Bytes In: {non_pipe_in_bytes / 2**20} MB')
-        print(f'+ Non-Pipelined Weight Bytes: {non_pipe_param_bytes / 2**10} KB')
-        print(f'+ Non-Pipelined Bytes Out: {non_pipe_out_bytes / 2**20} MB')
+        print(f'+ Non-Pipelined Bytes In: {self.total_iact_bytes / 2**20} MB')
+        print(f'+ Non-Pipelined Weight Bytes: {self.total_weight_bytes / 2**10} KB')
+        print(f'+ Non-Pipelined Bytes Out: {self.total_write_bytes / 2**20} MB')
         print('|')
 
-        pipe_total_bytes = self.input_bytes + self.weight_bytes + self.output_node.out_bytes
+        pipe_total_bytes = self.pipelined_bytes
 
-        print(f'+ Pipelined Bytes In: {self.input_bytes / 2**20} MB')
-        print(f'+ Pipelined Weight Bytes: {self.weight_bytes / 2**10} KB')
+        print(f'+ Pipelined Bytes In: {self.pipelined_read_bytes / 2**20} MB')
+        print(f'+ Pipelined Weight Bytes: {self.total_weight_bytes / 2**10} KB')
         print(f'+ Pipelined Bytes Out: {self.output_node.out_bytes / 2**20} MB')
         print('|')
 
-        print(f'+ Pipelined Traffic Savings: {non_pipe_total_bytes / pipe_total_bytes:.2f} x')
+        print(f'+ Pipelined Traffic Savings: {unpipe_total_bytes / pipe_total_bytes:.2f} x')
 
 
 
@@ -228,6 +273,8 @@ def record_node(node : Node):
     print()
     return node
 
+def generic(name, inputs, shape, dtype, params=[]):
+    return record_node(GenericOp(name, inputs, shape, dtype, params))
 
 def input(shape, dtype=DType.float32, name='input'): return record_node(Input(shape, dtype, name=name))
 def matmul(x : Node, y : Node, name='matmul'): return record_node(Matmul(x, y, name=name))
@@ -264,3 +311,19 @@ if __name__ == '__main__':
     print(y.params)
     print(y.output.fullname)
 
+def pipelined_analysis(g : Graph, sgs : list[Graph]):
+
+    for sg in sgs:
+        print('Subgraph: ', sg.name)
+        sg.pipelined_analysis()
+        print()
+
+    tot_bytes_saved = sum(sg.pipelined_bytes_saved for sg in sgs)
+
+    print(f'Graph total iact bytes: {g.total_iact_bytes / 2**20} MB')
+    print(f'Graph total weight bytes: {g.total_weight_bytes / 2**20} MB')
+    print(f'Graph total write bytes: {g.total_write_bytes / 2**20} MB')
+
+    print(f'Total DRAM Traffic: {g.total_bytes / 2**20} MB')
+    print(f'Total traffic saved: {tot_bytes_saved / 2**20} MB')
+    print(f'DRAM traffic with pipelined subgraphs: {(g.total_bytes - tot_bytes_saved) / 2**20} MB')
