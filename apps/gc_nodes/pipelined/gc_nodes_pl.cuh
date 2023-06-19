@@ -22,13 +22,13 @@ struct QueueEntry2D {
 };
 
 struct GcNodesMlp {
-    static const int n_rows = 64;
+    static const int n_rows = 128;
 
     static const int n_mlp_cols = 2;
-    static const int n_ln_cols = 2;
+    static const int n_ln_cols = 1;
     static const int n_cols = n_mlp_cols + n_ln_cols;
 
-    static const int mblk = 64;
+    static const int mblk = 128;
     static const int qlen = 2;
 
     int m;
@@ -56,7 +56,7 @@ struct GcNodesMlp {
 using BlockShape512x1024 = cutlass::gemm::GemmShape<GcNodesMlp::mblk, 512, 1024>;
 using BlockShape512x512 = cutlass::gemm::GemmShape<GcNodesMlp::mblk, 512, 512>;
 
-using WarpShape = cutlass::gemm::GemmShape<64, 64, 32>;  // 8 warps
+using WarpShape = cutlass::gemm::GemmShape<64, 128, 32>;  // 8 warps
 using LayerNormBlock = LayerNormShape<GcNodesMlp::mblk, 512>;
 
 const size_t num_warps = 8;
