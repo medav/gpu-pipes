@@ -17,7 +17,7 @@ import math
 
 cutlass = os.environ.get('CUTLASS_HOME', '/nobackup/medavies/cutlass')
 
-def make_ext(name, files : list[str], verbose=True):
+def make_ext(name, files : list[str], verbose=False):
     return load(
         name,
         files,
@@ -26,15 +26,22 @@ def make_ext(name, files : list[str], verbose=True):
         extra_ldflags=['-O3', f'-L{cutlass}/build/tools/library', '-lcutlass'],
         verbose=verbose)
 
-def benchmark(f, *args, flops=1, NI=1000):
+def benchmark(f, *args, flops=1, NI=5000):
+    torch.backends.cudnn.benchmark = False
     print('======== Performance ========')
+    f(*args)
+
+    ev_start = torch.cuda.Event(enable_timing=True)
+    ev_end = torch.cuda.Event(enable_timing=True)
     torch.cuda.synchronize()
 
     t0 = time.perf_counter()
+    ev_start.record()
     for _ in range(NI): f(*args)
+    ev_end.record()
     torch.cuda.synchronize()
     t1 = time.perf_counter()
 
-    tt = t1 - t0
+    tt = (ev_start.elapsed_time(ev_end) / 1000)
 
     print(f'Avg Latency: {1000 * tt / NI:.3f} ms, {flops * NI / tt / 1e9:.3f} GFLOPS')
