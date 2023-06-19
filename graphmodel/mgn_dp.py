@@ -78,15 +78,20 @@ with Graph(name='MLP') as g:
         ]
     )
 
-    y = message_passing(0, x)
-
+    for i in range(15):
+        x = message_passing(i, x)
 
 g.dump_dot()
-print()
 
-sg = g.subgraph(r'mp\[0\].nodes.mlp..*')
+sgs = [
+    g.subgraph(r'mp\[' + str(i) +  r'\].nodes.mlp..*')
+    for i in range(15)
+] + [
+    g.subgraph(r'mp\[' + str(i) +  r'\].edges\[0\].mlp..*')
+    for i in range(15)
+] + [
+    g.subgraph(r'mp\[' + str(i) +  r'\].edges\[1\].mlp..*')
+    for i in range(15)
+]
 
-sg.dump_dot()
-print()
-
-sg.pipelined_analysis()
+pipelined_analysis(g, sgs)
