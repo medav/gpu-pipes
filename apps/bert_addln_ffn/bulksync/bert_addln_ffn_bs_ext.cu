@@ -81,7 +81,7 @@ at::Tensor bert_addln_ffn(
     at::Tensor t1 = at::zeros({x.size(0), 512}, x.options());
     at::Tensor t2 = at::zeros({x.size(0), 128}, x.options());
     at::Tensor out = at::zeros({x.size(0), 128}, x.options());
-    bert_addln_ffn_out(attn_out, x, w0, b0, w1, b1, w2, b2, ga0, be0, ga2, be0, t0, t1, t2, out);
+    bert_addln_ffn_out(attn_out, x, w0, b0, w1, b1, w2, b2, ga0, be0, ga2, be2, t0, t1, t2, out);
     return out;
 }
 
