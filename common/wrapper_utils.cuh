@@ -10,3 +10,8 @@
     half * prefix ## _b = nullptr; \
     cudaErrCheck(cudaMalloc(&prefix ## _b, n_out * sizeof(*prefix ## _b)));
 
+#define ALLOC_LN_WEIGHTS(prefix, n) \
+    half * prefix ## _ga = nullptr; \
+    cudaErrCheck(cudaMalloc(&prefix ## _ga, n * sizeof(*prefix ## _ga))); \
+    half * prefix ## _be = nullptr; \
+    cudaErrCheck(cudaMalloc(&prefix ## _be, n * sizeof(*prefix ## _be)));
