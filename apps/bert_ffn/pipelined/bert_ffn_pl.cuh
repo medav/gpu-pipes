@@ -22,10 +22,10 @@ struct QueueEntry2D {
 };
 
 struct BertFfn {
-    static const int n_rows = 16;
+    static const int n_rows = 64;
 
     static const int n_mlp_cols = 3;
-    static const int n_ln_cols = 4;
+    static const int n_ln_cols = 1;
     static const int n_cols = n_mlp_cols + n_ln_cols;
 
     static const int mblk = 128;
