@@ -22,10 +22,10 @@ struct QueueEntry2D {
 };
 
 struct GcNodesMlp {
-    static const int n_rows = 32;
+    static const int n_rows = 64;
 
     static const int n_mlp_cols = 2;
-    static const int n_ln_cols = 4;
+    static const int n_ln_cols = 2;
     static const int n_cols = n_mlp_cols + n_ln_cols;
 
     static const int mblk = 64;
