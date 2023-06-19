@@ -1,3 +1,3 @@
 
-APP=bert_ffn_bs_cc
+APP=gc_nodes_bs_cc
 include ../../../common/app.mk
