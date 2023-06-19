@@ -26,7 +26,7 @@ def make_ext(name, files : list[str], verbose=False):
         extra_ldflags=['-O3', f'-L{cutlass}/build/tools/library', '-lcutlass'],
         verbose=verbose)
 
-def benchmark(f, *args, flops=1, NI=5000):
+def benchmark(f, *args, flops=1, NI=10000):
     torch.backends.cudnn.benchmark = False
     print('======== Performance ========')
     f(*args)
