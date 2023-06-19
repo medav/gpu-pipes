@@ -2,7 +2,8 @@
 
 #include <cuda_fp16.h>
 
-#include "nerf_full_pl.cuh"
+#include "wrapper_utils.cuh"
+#include "nerf_a_pl.cuh"
 #include "bulksync_gemm.cuh"
 #include "utils.cuh"
 
@@ -13,43 +14,18 @@ int main(int argc, char * argv[]) {
     printf("NI: %zu\n", NI);
 
 
-    half * in;
-    half * w1;
-    half * b1;
-    half * w2;
-    half * b2;
-    half * w3;
-    half * b3;
-    half * w4;
-    half * b4;
-    half * w5;
-    half * b5;
-    half * w6;
-    half * b6;
-    half * w7;
-    half * b7;
-    half * w8;
-    half * b8;
-    half * out;
+    ALLOC_TENSOR_2D(x, MM, 64)
 
-    cudaErrCheck(cudaMalloc(&in, MM * 64 * sizeof(*in)));
-    cudaErrCheck(cudaMalloc(&w1, 256 * 64 * sizeof(*w1)));
-    cudaErrCheck(cudaMalloc(&b1, 256 * sizeof(*b1)));
-    cudaErrCheck(cudaMalloc(&w2, 256 * 256 * sizeof(*w2)));
-    cudaErrCheck(cudaMalloc(&b2, 256 * sizeof(*b2)));
-    cudaErrCheck(cudaMalloc(&w3, 256 * 256 * sizeof(*w3)));
-    cudaErrCheck(cudaMalloc(&b3, 256 * sizeof(*b3)));
-    cudaErrCheck(cudaMalloc(&w4, 256 * 256 * sizeof(*w4)));
-    cudaErrCheck(cudaMalloc(&b4, 256 * sizeof(*b4)));
-    cudaErrCheck(cudaMalloc(&w5, 256 * 256 * sizeof(*w5)));
-    cudaErrCheck(cudaMalloc(&b5, 256 * sizeof(*b5)));
-    cudaErrCheck(cudaMalloc(&w6, 256 * 320 * sizeof(*w6)));
-    cudaErrCheck(cudaMalloc(&b6, 256 * sizeof(*b6)));
-    cudaErrCheck(cudaMalloc(&w7, 256 * 256 * sizeof(*w7)));
-    cudaErrCheck(cudaMalloc(&b7, 256 * sizeof(*b7)));
-    cudaErrCheck(cudaMalloc(&w8, 256 * 256 * sizeof(*w8)));
-    cudaErrCheck(cudaMalloc(&b8, 256 * sizeof(*b8)));
-    cudaErrCheck(cudaMalloc(&out, MM * 256 * sizeof(*out)));
+    ALLOC_LINEAR_WEIGHTS(l1, 64, 256)
+    ALLOC_LINEAR_WEIGHTS(l2, 256, 256)
+    ALLOC_LINEAR_WEIGHTS(l3, 256, 256)
+    ALLOC_LINEAR_WEIGHTS(l4, 256, 256)
+    ALLOC_LINEAR_WEIGHTS(l5, 256, 256)
+    ALLOC_LINEAR_WEIGHTS(l6, 256, 256)
+    ALLOC_LINEAR_WEIGHTS(l7, 256, 256)
+    ALLOC_LINEAR_WEIGHTS(l8, 256, 256)
+
+    ALLOC_TENSOR_2D(out, MM, 256)
 
     dim3 grid(NerfAMlp::n_cols, NerfAMlp::n_rows);
     dim3 block(32, num_warps);
@@ -58,17 +34,17 @@ int main(int argc, char * argv[]) {
 
     float time_ms = cuda_time_kernel_ms([&]() {
         for (size_t i = 0; i < NI; i++) {
-            nerf_full_device<<<grid, block, max_smem>>>(
+            nerf_a_device<<<grid, block, max_smem>>>(
                 MM,
-                in,
-                w1, b1,
-                w2, b2,
-                w3, b3,
-                w4, b4,
-                w5, b5,
-                w6, b6,
-                w7, b7,
-                w8, b8,
+                x,
+                l1_w, l1_b,
+                l2_w, l2_b,
+                l3_w, l3_b,
+                l4_w, l4_b,
+                l5_w, l5_b,
+                l6_w, l6_b,
+                l7_w, l7_b,
+                l8_w, l8_b,
                 out,
                 global_queue_space()
             );
