@@ -80,11 +80,12 @@ using BlockShape256x320 = cutlass::gemm::GemmShape<NerfAMlp::mblk, 256, 320>;
 
 using WarpShape = cutlass::gemm::GemmShape<32, 64, 32>;
 
-const size_t num_warps = std::max({
-    PipeGemmBiasRelu<BlockShape256x64, WarpShape>::num_warps,
-    PipeGemmBiasRelu<BlockShape256x256, WarpShape>::num_warps,
-    PipeGemmBiasRelu<BlockShape256x320, WarpShape>::num_warps
-});
+const size_t num_warps = 8;
+
+static_assert(PipeGemmBiasRelu<BlockShape256x64, WarpShape>::num_warps == num_warps);
+static_assert(PipeGemmBiasRelu<BlockShape256x256, WarpShape>::num_warps == num_warps);
+static_assert(PipeGemmBiasRelu<BlockShape256x320, WarpShape>::num_warps == num_warps);
+
 
 const size_t max_smem = std::max({
     sizeof(typename PipeGemmBiasRelu<BlockShape256x64, WarpShape>::SmemBuffers),
