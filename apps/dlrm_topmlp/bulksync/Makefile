@@ -1,3 +1,3 @@
 
-APP=dlrm_botmlp_bs_cc
+APP=dlrm_topmlp_bs_cc
 include ../../../common/app.mk
