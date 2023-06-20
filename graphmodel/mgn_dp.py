@@ -47,7 +47,7 @@ def message_passing(i : int, x : MultiGraph):
         x.nf
     ] + [
         index(x.nf, edge_set.dsts, name=f'mp[{i}].edge_dsts[{j}]')
-        for j, edge_set in enumerate(x.edges)
+        for j, edge_set in enumerate(new_edges)
     ]
 
     node_concat_out = concat(node_concat, name=f'mp[{i}].nodes.concat')
