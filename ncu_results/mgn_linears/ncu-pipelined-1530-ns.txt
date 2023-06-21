@@ -1,0 +1,19 @@
+==PROF== Connected to process 4172511 (/home/scratch.karus_nvresearch/data-pipeline-work2/gpu-pipes/apps/mgn_linears/pipelined/mgn_linears_pl_cc.elf)
+==PROF== Profiling "linears_device" - 0: 0%....50%....100% - 6 passes
+NI: 1
+Avg latency: 1641.128906 ms
+GFLOPS: 130.854050
+==PROF== Disconnected from process 4172511
+[4172511] mgn_linears_pl_cc.elf@127.0.0.1
+  linears_device(int, __half *, __half *, __half *, __half *, __half *, __half *, __half *, __half *, void *) (3, 128, 1)x(32, 8, 1), Context 1, Stream 7, Device 0, CC 8.0
+    Section: Command line profiler metrics
+    --------------------------------------------------------------- ----------- ------------
+    Metric Name                                                     Metric Unit Metric Value
+    --------------------------------------------------------------- ----------- ------------
+    gpu__dram_throughput.avg.pct_of_peak_sustained_elapsed                    %        20.64
+    gpu__time_duration.sum                                              msecond         3.25
+    sm__inst_executed_pipe_fp16.avg.pct_of_peak_sustained_elapsed             %         2.26
+    sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_elapsed           %        36.17
+    sm__throughput.avg.pct_of_peak_sustained_elapsed                          %        36.17
+    --------------------------------------------------------------- ----------- ------------
+
