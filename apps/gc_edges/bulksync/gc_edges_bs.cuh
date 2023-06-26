@@ -7,7 +7,7 @@
 #include "layer_norm_v2.cuh"
 #include "utils.cuh"
 
-const size_t MM = 64*512;
+const size_t MM = 512*512;
 
 template<size_t M>
 void gc_edges_bs(

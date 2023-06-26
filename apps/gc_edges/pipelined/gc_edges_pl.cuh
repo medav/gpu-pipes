@@ -22,7 +22,7 @@ struct QueueEntry2D {
 };
 
 struct GcEdgesMlp {
-    static const int n_rows = 128;
+    static const int n_rows = 32;
 
     static const int n_mlp_cols = 2;
     static const int n_ln_cols = 1;

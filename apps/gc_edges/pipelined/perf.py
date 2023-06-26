@@ -5,7 +5,7 @@ from common import utils
 from . import ext
 
 def test_performance(NI=5000):
-    M = 64 * 512
+    M = 512 * 512
     torch.manual_seed(0)
     x = torch.randn(M, 1536, dtype=torch.float16, device='cuda')
 
