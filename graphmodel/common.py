@@ -318,6 +318,7 @@ def pipelined_analysis(g : Graph, sgs : list[Graph]):
         sg.pipelined_analysis()
         print()
 
+    tot_bytes_pipe = sum(sg.total_bytes for sg in sgs)
     tot_bytes_saved = sum(sg.pipelined_bytes_saved for sg in sgs)
 
     print(f'Graph total iact bytes: {g.total_iact_bytes / 2**20} MB')
@@ -325,5 +326,7 @@ def pipelined_analysis(g : Graph, sgs : list[Graph]):
     print(f'Graph total write bytes: {g.total_write_bytes / 2**20} MB')
 
     print(f'Total DRAM Traffic: {g.total_bytes / 2**20} MB')
+    print(f'Subgraph DRAM Traffic: {tot_bytes_pipe / 2**20} MB')
     print(f'Total traffic saved: {tot_bytes_saved / 2**20} MB')
     print(f'DRAM traffic with pipelined subgraphs: {(g.total_bytes - tot_bytes_saved) / 2**20} MB')
+    print(f'Subgraph DRAM traffic with pipelined subgraphs: {(tot_bytes_pipe - tot_bytes_saved) / 2**20} MB')
