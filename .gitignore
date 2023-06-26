@@ -4,3 +4,5 @@ test_2sm_gemm_pipe
 test_mgn_node_pipe
 *.elf
 __pycache__
+*.pdf
+*.ptx
