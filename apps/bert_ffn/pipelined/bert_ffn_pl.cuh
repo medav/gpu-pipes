@@ -24,7 +24,7 @@ struct QueueEntry2D {
 struct BertFfn {
     static const int n_rows = 64;
 
-    static const int n_mlp_cols = 3;
+    static const int n_mlp_cols = 2;
     static const int n_ln_cols = 1;
     static const int n_cols = n_mlp_cols + n_ln_cols;
 
@@ -91,23 +91,12 @@ __device__ void linear1(BertFfn& prob, int row) {
     const int num_iters = prob.m / BertFfn::mblk / BertFfn::n_rows;
 
     QueueReader ir(prob.qs[row].q1);
-    NullReader ar;
-    QueueWriter ow(prob.qs[row].q2);
+    auto ar = read_striped_input(prob.in, row, num_iters, BertFfn::mblk, 128);
+    QueueWriter ow(prob.qs[row].q3);
 
     pipe_gemm_bias<BlockShape128x512, WarpShape128x512>(
         {&prob.w2[0], 128}, {&prob.b2[0], 0}, ir, ar, ow, num_iters);
 }
-
-__device__ void add(BertFfn& prob, int row) {
-    const int num_iters = prob.m / BertFfn::mblk / BertFfn::n_rows;
-
-    QueueReader ir1(prob.qs[row].q2);
-    auto ir2 = read_striped_input(prob.in, row, num_iters, BertFfn::mblk, 128);
-    QueueWriter ow(prob.qs[row].q3);
-
-    pipe_add<AddShape<BertFfn::mblk, 128>>(ir1, ir2, ow, num_iters);
-}
-
 
 __device__ void ln_sm(BertFfn& prob, int row, int ln) {
     const int num_iters_per_row = prob.m / BertFfn::mblk / BertFfn::n_rows;
@@ -165,7 +154,6 @@ __global__ void bert_ffn_device(
     switch (pipe_col) {
         case 0: linear0(prob, pipe_row); return;
         case 1: linear1(prob, pipe_row); return;
-        case 2: add(prob, pipe_row); return;
         default:
             pipe_col -= BertFfn::n_mlp_cols;
             if (pipe_col < BertFfn::n_ln_cols) ln_sm(prob, pipe_row, pipe_col);
