@@ -48,9 +48,8 @@ NCU=/opt/nvidia/nsight-compute/2022.2.1/ncu
 [ -x "$NCU" ] || NCU=ncu
 echo "Using ncu: $NCU"
 
-NW=1 NI=1 MODE=ncu $NCU \
+$NCU \
     $SAMP_NCU_FLAG \
-    -k kernel \
     --target-processes all \
     --metrics gpu__time_duration.sum,sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_elapsed,gpu__dram_throughput.avg.pct_of_peak_sustained_elapsed,sm__inst_executed_pipe_fp16.avg.pct_of_peak_sustained_elapsed \
     $*
