@@ -15,72 +15,85 @@
 #include "mpmcq.cuh"
 #include "utils.cuh"
 
+#ifndef PLKB
+#warning "PLKB not defined, using default value of 1"
+#define PLKB 1
+#endif
+
+#ifndef NWARPS
+#warning "NWARPS not defined, using default value of 32"
+#define NWARPS 32
+#endif
+
+
 typedef unsigned long size_t;
 
-template<typename DT, size_t M, size_t D>
+template<typename DT, size_t M, size_t N>
 struct QueueEntry2D {
     using Element = DT;
-    Element buf[M][D];
+    Element buf[M][N];
 
-    __device__ half * as_ptr() { return (half *)buf; }
-    __device__ TensorView as_view() { return {as_ptr(), D}; }
+    __device__ int * as_ptr() { return (int *)buf; }
+    __device__ TensorView as_view() { return {(half *)as_ptr(), N}; }
     __device__ QueueEntry2D() {}
 };
 
-template<typename T, int N>
-__device__ void memcpy_tol2(
-    T * dst,
-    T * src,
-    const int M
-) {
-    static_assert(N * sizeof(T) % 16 == 0, "N must be a multiple of 16");
 
-    constexpr int Nbytes = N * sizeof(T);
-    constexpr int N4 = Nbytes / 16;
+template<int M, int N, int NW>
+__device__ void write_l2(int * dst, int i) {
+    int lane = threadIdx.x;
+    int warp = threadIdx.y;
 
-    const int lane = threadIdx.x;
-    const int warp = threadIdx.y;
-
-    int4 * dst4 = reinterpret_cast<int4 *>(dst);
-    int4 * src4 = reinterpret_cast<int4 *>(src);
-
-    for (int i = lane; i < M; i += blockDim.x) {
-        for (int d = warp; d < N4; d += blockDim.y) {
-            dst4[i * N4 + d] = src4[d];
+    for (int m = 0; m < M; m += NW) {
+        for (int n = 0; n < N; n += 32) {
+            int idx = (m + warp) * N + (n + lane);
+            if (idx < M * N) {
+                int * ptr = &dst[idx];
+                int val = blockIdx.y ^ idx;
+                asm volatile (
+                    "st.global.cg.u32 [%0], %1;\n\t"
+                    :
+                    : "l"(ptr), "r"(val)
+                    : "memory"
+                );
+            }
         }
     }
 }
 
-template<typename T, int N>
-__device__ void memcpy_froml2(
-    T * dst,
-    T * src,
-    const int M
-) {
-    static_assert(N * sizeof(T) % 16 == 0, "N must be a multiple of 16");
+template<int M, int N, int NW>
+__device__ int read_l2(int * src, int i) {
+    int lane = threadIdx.x;
+    int warp = threadIdx.y;
 
-    constexpr int Nbytes = N * sizeof(T);
-    constexpr int N4 = Nbytes / 16;
+    int acc = 0;
 
-    const int lane = threadIdx.x;
-    const int warp = threadIdx.y;
+    for (int m = 0; m < M; m += NW) {
+        for (int n = 0; n < N; n += 32) {
+            int idx = (m + warp) * N + (n + lane);
+            if (idx < M * N) {
+                int * ptr = &src[idx];
+                int val;
+                asm volatile (
+                    "ld.global.cg.u32 %0, [%1];\n\t"
+                    : "=r"(val)
+                    : "l"(ptr)
+                );
 
-    int4 * dst4 = reinterpret_cast<int4 *>(dst);
-    int4 * src4 = reinterpret_cast<int4 *>(src);
-
-    for (int i = lane; i < M; i += blockDim.x) {
-        for (int d = warp; d < N4; d += blockDim.y) {
-            dst4[d] = src4[i * N4 + d];
+                acc += val;
+            }
         }
     }
+
+    return acc;
 }
 
 struct Pipeline {
-    static const size_t mblk = 4;
-    static const size_t d = 128;
-    static const size_t qlen = 4;
+    static const size_t mblk = PLKB * 4; // divide by 4 for payload size
+    static const size_t n = 64;
+    static const size_t qlen = 2;
 
-    using QEntry = QueueEntry2D<half, mblk, d>;
+    using QEntry = QueueEntry2D<int, mblk, n>;
     using Queue = MpmcRingQueue<QEntry, qlen, 1, 1>;
 };
 
@@ -92,9 +105,9 @@ inline typename Pipeline::Queue * alloc_queue_space(int NR) {
     const size_t q_bytes = NR * sizeof(*qs_dev);
 
     cudaErrCheck(cudaMalloc(&qs_dev, q_bytes));
-    cudaErrCheck(cudaMemset(qs_dev, 0, q_bytes));
+    cudaErrCheck(cudaMemset(qs_dev, 0xFF, q_bytes));
 
-    pin_memory(qs_dev, q_bytes);
+    // pin_memory(qs_dev, q_bytes);
 
     printf("Allocated %lu Kbytes for %d queues\n", q_bytes/1024, NR);
 
@@ -105,52 +118,51 @@ inline void free_queue_space(void * qs_dev) {
     cudaErrCheck(cudaFree(qs_dev));
 }
 
-__device__ void sender(Pipeline::Queue& q, int M, int NI) {
-    __shared__ half buf[Pipeline::d];
-    MemoryReader ir(buf, 0, Pipeline::d);
-    QueueWriter ow(q);
+template<int M, int N, int NW>
+__device__ void sender(Pipeline::Queue& q, int NI) {
+    q.reset();
 
     for (int i = 0; i < NI; i++) {
-        TensorView t_in = ir.read_acquire();
-        TensorView t_out = ow.write_acquire();
-        memcpy_tol2<half, Pipeline::d>(t_out.data, t_in.data, M);
-        ir.read_release();
-        ow.write_release();
+        int * ptr = q.write_wait(i).as_ptr();
+        write_l2<M, N, NW>(ptr, i);
+        __syncthreads();
+        q.write_commit(i);
     }
 }
 
-__device__ void receiver(Pipeline::Queue& q, int M, int NI) {
-    __shared__ half buf[Pipeline::d];
-    QueueReader ir(q);
-    MemoryWriter ow(buf, 0, Pipeline::d);
-
+template<int M, int N, int NW>
+__device__ int receiver(Pipeline::Queue& q, int NI) {
+    int acc = 0;
     for (int i = 0; i < NI; i++) {
-        TensorView t_in = ir.read_acquire();
-        TensorView t_out = ow.write_acquire();
-        memcpy_froml2<half, Pipeline::d>(t_out.data, t_in.data, M);
-        ir.read_release();
-        ow.write_release();
+        int * ptr = q.read_wait(i).as_ptr();
+        acc += read_l2<M, N, NW>(ptr, i);
+        __syncthreads();
+        q.read_commit(i);
     }
+
+    return acc;
 }
 
-__global__ void sendrecv(Pipeline::Queue * qs, int M, int NI) {
+template<int M, int N, int NW>
+__global__ void sendrecv(Pipeline::Queue * qs, int NI, int * out) {
     int row = blockIdx.y;
+    int acc = 0;
 
     if (blockIdx.x == 0) {
-        sender(qs[row], M, NI);
-    } else {
-        receiver(qs[row], M, NI);
+        sender<M, N, NW>(qs[row], NI);
+    } else if (blockIdx.x == 1) {
+        acc = receiver<M, N, NW>(qs[row], NI);
     }
 
+    *out = acc;
 }
 
 
 int main(int argc, char * argv[]) {
     const int NI = std::atoi(argv[1]);
     const int NR = std::atoi(argv[2]);
-    const int NWARPS = std::atoi(argv[3]);
 
-    const size_t payload_bytes = Pipeline::mblk * Pipeline::d * sizeof(half);
+    const size_t payload_bytes = sizeof(Pipeline::QEntry);
 
     printf("Num Iters: %d\n", NI);
     printf("Num Prod/Cons pairs: %d (%d Threadblocks)\n", NR, NR * 2);
@@ -162,15 +174,21 @@ int main(int argc, char * argv[]) {
 
     Pipeline::Queue * qs_dev = alloc_queue_space(NR);
 
+    int * out_dev = nullptr;
+    cudaErrCheck(cudaMalloc(&out_dev, sizeof(int)));
+
+
+    // configure_smem((void *)sendrecv<Pipeline::mblk, Pipeline::n, NWARPS>, smem);
+
     float time_ms = cuda_time_kernel_ms([&]() {
-        sendrecv<<<grid, block>>>(qs_dev, Pipeline::mblk, NI);
+        sendrecv<Pipeline::mblk, Pipeline::n, NWARPS><<<grid, block>>>(qs_dev, NI, out_dev);
     });
 
 
     printf("Time: %f ms\n", time_ms);
 
-    float tot_bytes_tx = NI * NR * Pipeline::mblk * Pipeline::d * sizeof(half);
-    float tot_bytes_rx = NI * NR * Pipeline::mblk * Pipeline::d * sizeof(half);
+    float tot_bytes_tx = NI * NR * sizeof(Pipeline::QEntry);
+    float tot_bytes_rx = NI * NR * sizeof(Pipeline::QEntry);
 
     float bw_tx = tot_bytes_tx / (time_ms * 1e-3);
     float bw_rx = tot_bytes_rx / (time_ms * 1e-3);
