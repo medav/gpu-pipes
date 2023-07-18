@@ -34,8 +34,8 @@ with Graph(name='TransformerLayer') as g:
 
 
 
-sg0 = g.subgraph(r'layer\[0\].mlp..*')
-sg1 = g.subgraph(r'layer\[1\].mlp..*')
+sg0 = g.subgraph(r'layer\[0\].mlp..*', 'bert_ffn')
+sg1 = g.subgraph(r'layer\[1\].mlp..*', 'bert_ffn')
 
 pipelined_analysis(g, [sg0, sg1])
 

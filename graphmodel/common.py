@@ -126,12 +126,13 @@ class Graph:
         global _current_graph
         _current_graph = None
 
-    def subgraph(self, pattern : str):
+    def subgraph(self, pattern : str, name=None):
+        name = name if name is not None else self.name
         return Graph(nodes={
             name: node
             for name, node in self.nodes.items()
             if re.match(pattern, name)
-        }, name=f'fused_{self.name}')
+        }, name=f'fused_{name}')
 
 
     def dump_dot(self):
@@ -240,6 +241,7 @@ class Graph:
         print(f'+ Non-Pipelined Bytes In: {self.total_iact_bytes / 2**20} MB')
         print(f'+ Non-Pipelined Weight Bytes: {self.total_weight_bytes / 2**10} KB')
         print(f'+ Non-Pipelined Bytes Out: {self.total_write_bytes / 2**20} MB')
+        print(f'+ Non-Pipelined Traffic: {unpipe_total_bytes} B')
         print('|')
 
         pipe_total_bytes = self.pipelined_bytes
@@ -247,6 +249,7 @@ class Graph:
         print(f'+ Pipelined Bytes In: {self.pipelined_read_bytes / 2**20} MB')
         print(f'+ Pipelined Weight Bytes: {self.total_weight_bytes / 2**10} KB')
         print(f'+ Pipelined Bytes Out: {self.output_node.out_bytes / 2**20} MB')
+        print(f'+ Pipelined Traffic: {pipe_total_bytes} B')
         print('|')
 
         print(f'+ Pipelined Traffic Savings: {unpipe_total_bytes / pipe_total_bytes:.2f} x')

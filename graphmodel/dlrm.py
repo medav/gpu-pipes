@@ -44,8 +44,8 @@ with Graph(name='DLRM') as g:
     # Top MLP
     top_mlp_out = mlp(interact_cat, [479, 1024, 1024, 512, 256, 1], name='topmlp')
 
-sg0 = g.subgraph(r'botmlp..*')
-sg1 = g.subgraph(r'topmlp..*')
+sg0 = g.subgraph(r'botmlp..*', 'botmlp')
+sg1 = g.subgraph(r'topmlp..*', 'topmlp')
 
 pipelined_analysis(g, [sg0, sg1])
 

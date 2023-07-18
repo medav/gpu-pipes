@@ -80,10 +80,10 @@ with Graph(name='MLP') as g:
 g.dump_dot()
 
 sgs = [
-    g.subgraph(r'mp\[' + str(i) +  r'\].nodes.mlp..*')
+    g.subgraph(r'mp\[' + str(i) +  r'\].nodes.mlp..*', 'node_mlp')
     for i in range(num_mp_steps)
 ] + [
-    g.subgraph(r'mp\[' + str(i) +  r'\].edges\[0\].mlp..*')
+    g.subgraph(r'mp\[' + str(i) +  r'\].edges\[0\].mlp..*', 'edge_mlp')
     for i in range(num_mp_steps)
 ]
 
