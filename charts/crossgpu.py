@@ -44,6 +44,11 @@ mem_bw = {
     'H100': 2039
 }
 
+for gpu in gpu_names:
+    print(f'{gpu.ljust(15)}: {fp16_tflops[gpu]:.2f} TFLOP/s,  {mem_bw[gpu]:.2f} GB/s, {fp16_tflops[gpu] * 1000 / mem_bw[gpu]:.2f} GFLOP/GB')
+
+print()
+
 def dataflow_speedup(gpu : str):
     gpu_baseline_gflops = a100_baseline_gflops * (mem_bw[gpu] / mem_bw['A100'])
     gpu_dataflow_gflops = a100_dataflow_gflops * (fp16_tflops[gpu] / fp16_tflops['A100'])
@@ -61,42 +66,11 @@ for gpu in gpu_names:
     fastqs = np.append(fastqs, gmean(fastqs))
     print(f'{gpu}:')
     for i, app in enumerate(app_names + ['GM']):
-        print(f'    {app}: {dataflow[i]:.2f} {fastqs[i]:.2f}')
+        print(f'    {app}: {dataflow[i]:.2f} {fastqs[i]:.2f} {fastqs[i] / dataflow[i]:.2f}')
     print()
 
 
-with figure(COL_WIDTH, 2.5, 1, 1, name='fastq') as (fig, ax):
-
-    speeds = np.array([
-        dataflow_speedup('A100'),
-        fastq_speedup('A100')
-    ])
-
-    # add geomean
-    speeds = np.array([
-        np.append(speeds[0], gmean(speeds[0])),
-        np.append(speeds[1], gmean(speeds[1]))
-    ])
-
-    app_names_gm = app_names + ['GM']
-
-    multibars(
-        ax,
-        app_names_gm,
-        ['+Dataflow', '+Fast Qs'],
-        speeds,
-        baseline=True,
-        ylim=8,
-        labeloverflow=True,
-        bar_width=0.5,
-        pad_width=0.1,
-    )
-
-    plt.title('Impact of Fast Queues', fontsize=8)
-    plt.tight_layout()
-
-
-with figure(COL_WIDTH, 6, len(gpu_names), 1, name='crossgpu_apps', sharex=True) as (fig, axs):
+with figure(TEXT_WIDTH, 2, 1, len(gpu_names), name='crossgpu_apps') as (fig, axs):
     lims = [5, 15, 8, 15, 25, 16]
 
     for i, ax in enumerate(axs):
@@ -105,7 +79,7 @@ with figure(COL_WIDTH, 6, len(gpu_names), 1, name='crossgpu_apps', sharex=True) 
         dataflow = dataflow_speedup(gpu_name)
         fastqs = fastq_speedup(gpu_name)
 
-        multibars(
+        stacked_multibars(
             ax,
             app_names,
             ['+Dataflow', '+Fast Qs'],
@@ -113,27 +87,28 @@ with figure(COL_WIDTH, 6, len(gpu_names), 1, name='crossgpu_apps', sharex=True) 
             baseline=True,
             labeloverflow=True,
             ylim=lims[i],
-            overflow_ypos_pct=0.88,
+            overflow_ypos_pct=0.90,
             locator_bins=4
         )
 
-        ax.set_ylabel(gpu_name, fontsize=8)
+        ax.set_title(gpu_name, fontsize=8)
 
-        if i == 0: ax.set_title('GPU cross Application Performance', fontsize=8)
-        elif i == 5:
+        ax.tick_params(labelsize=6)
+
+        if i == 5:
             ax.legend(
                 fontsize=6,
-                ncol=2,
+                ncol=1,
                 loc='upper right',
-                framealpha=0.0,
-                bbox_to_anchor=(1.0, 1.05),
+                framealpha=1.0,
+                bbox_to_anchor=(1.25, 1.08),
                 facecolor='#FFFFFF',
-                edgecolor='#FFFFFF')
+                edgecolor='#000000')
 
 
-    fig.align_ylabels(axs)
+    # fig.align_ylabels(axs)
     plt.tight_layout()
-    plt.subplots_adjust(hspace=0.2)
+    plt.subplots_adjust(wspace=0.3)
 
 
 with figure(COL_WIDTH, 6, len(app_names), 2, name='crossgpu_gpu', sharex=True) as (fig, axs):

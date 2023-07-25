@@ -15,9 +15,9 @@ app_names = [
 speedup = np.array([
     1.115,
     1.139,
-    0.934,
+    1.024,
     1.212,
-    0.871,
+    0.960
 ])
 
 traffic_reduction = np.array([

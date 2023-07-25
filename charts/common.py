@@ -26,8 +26,10 @@ def bars(
     labels, # [N]
     data,   # [N]
     baseline=False,
+    baseline_y=1,
     bar_width=0.75,
     ylim=None,
+    locator_bins=10,
     labeloverflow=False,
     labelrot=90,
     color=colors[0],
@@ -41,7 +43,7 @@ def bars(
     if baseline:
         ax.plot(
             [-bar_width, nbars - 1 + bar_width],
-            [1, 1],
+            [baseline_y, baseline_y],
             color='black',
             linestyle='--',
             linewidth=1.0)
@@ -59,11 +61,13 @@ def bars(
 
     ax.set_xlim([-bar_width / 2, nbars - 1 + bar_width / 2])
     if ylim is not None: ax.set_ylim([0, ylim])
-    if intylabels: ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+    if intylabels: ax.yaxis.set_major_locator(MaxNLocator(nbins=locator_bins, integer=True))
 
     ax.set_xticks(xs)
     ax.set_xticklabels(labels, rotation=labelrot)
     ax.tick_params(labelsize=8)
+
+    return xs
 
 def multibars(
     ax,
@@ -119,6 +123,69 @@ def multibars(
             linewidth=1.0)
 
     ax.set_xlim([0, ngrps * (nsets * bar_width + pad_width) - pad_width])
+    if intylabels: ax.yaxis.set_major_locator(MaxNLocator(nbins=locator_bins, integer=True))
+    if ylim is not None: ax.set_ylim([0, ylim])
+
+    if set_xticks:
+        ax.set_xticks(label_xs)
+        ax.set_xticklabels(grouplabels, rotation=labelrot)
+
+    ax.tick_params(labelsize=8)
+
+def stacked_multibars(
+    ax,
+    grouplabels, # [ngrps]
+    setlabels,   # [nsets]
+    data,   # [nsets, ngrps]
+    baseline=False,
+    bar_width=0.75,
+    pad_width=0.1,
+    ylim=None,
+    labeloverflow=False,
+    labelrot=90,
+    setcolors=None, # [nsets]
+    intylabels=True,
+    set_xticks=True,
+    overflow_ypos_pct=0.92,
+    locator_bins=10
+):
+    nsets = len(setlabels)
+    ngrps = len(grouplabels)
+
+    setcolors = setcolors if setcolors is not None else colors[:nsets]
+
+    xs = np.arange(ngrps) * (1 * bar_width + pad_width) + bar_width / 2
+    label_xs = (xs - bar_width / 2) + (1 * bar_width) / 2
+
+    for i in range(nsets):
+        ax.bar(
+            xs,
+            data[i, :],
+            bar_width,
+            color=setcolors[i],
+            label=setlabels[i],
+            zorder=-i)
+
+        if labeloverflow:
+            for j in range(ngrps):
+                if int(data[i, j]) > ylim:
+                    ax.text(
+                        xs[j],
+                        ylim * overflow_ypos_pct,
+                        f'{int(data[i, j])}',
+                        ha='center',
+                        fontsize=6,
+                        zorder=999)
+
+    if baseline:
+        ax.plot(
+            [0, ngrps * (1 * bar_width + pad_width) - pad_width],
+            [1, 1],
+            color='black',
+            linestyle='--',
+            linewidth=1.0)
+
+    ax.set_xlim([0, ngrps * (1 * bar_width + pad_width) - pad_width])
     if intylabels: ax.yaxis.set_major_locator(MaxNLocator(nbins=locator_bins, integer=True))
     if ylim is not None: ax.set_ylim([0, ylim])
 

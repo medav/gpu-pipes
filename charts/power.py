@@ -1,41 +1,64 @@
-import numpy as np
-from matplotlib import pyplot as plt
+from .common import *
 
-colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
-COL_WIDTH = (8.5 - 1.5 - 0.25) / 2
-TEXT_WIDTH = 8.5 - 1.5
+payload_kb = np.array([1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048])
 
-pow_1530 = np.array([275, 269, 275])
-pow_825 = np.array([172, 140, 140])
+pow_1q = np.array([72, 71, 71, 72, 72, 74, 76, 76, 78, 80, 85, 84])
+pow_54q = np.array([141, 145, 147, 161, 185, 198, 217, 220, 250, 245, 248, 249])
 
-# Set up the figure and axes
-fig, ax = plt.subplots(figsize=(COL_WIDTH, 2))
-bar_width = 0.35
+dram_1q = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+dram_54q = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0.33, 0.73, 0.74, 0.75])
 
-bar_positions = np.arange(3)
-ax.bar(bar_positions - bar_width/2, pow_1530, bar_width, color=colors[0], label='1530 MHz')
-ax.bar(bar_positions + bar_width/2, pow_825, bar_width, color=colors[2], label='825 MHz')
 
-ax.set_xticks(bar_positions)
-ax.set_xticklabels([
-    'Bulk-Sync',
-    'Pipelined',
-    'Pipelined-NS'
-], fontsize=8)
 
-ax.set_ylabel('Power (W)', fontsize=8)
-ax.tick_params(labelsize=8)
+with figure(COL_WIDTH, 2, 1, 2) as (fig, (ax1, ax2)):
+    labels = list(map(lambda s: f'{s} KB', payload_kb))
+    bars(
+        ax1,
+        payload_kb,
+        pow_1q,
+        ylim=100,
+        intylabels=True,
+        locator_bins=8,
+        labeloverflow=True,
+        color=colors[4],
+        baseline=True)
 
-ax.legend(
-    fontsize=8,
-    ncol=2,
-    loc='upper center',
-    framealpha=1.0,
-    facecolor='#FFFFFF',
-    edgecolor='#FFFFFF')
+    ax1.set_title('1 Queue Power (W)', fontsize=8)
+    ax1.set_xlabel('Payload Size (KB)', fontsize=8)
 
-ax.set_ylim([0, 375])
+    xs = bars(
+        ax2,
+        payload_kb,
+        pow_54q,
+        ylim=300,
+        intylabels=True,
+        labeloverflow=True,
+        locator_bins=8,
+        color=colors[9],
+        baseline=True)
 
-plt.title('Power Masurements of mgn_linears', fontsize=8)
-plt.tight_layout()
-plt.savefig('power.pdf')
+    ax2.plot(
+        list(ax2.get_xlim()),
+        [250, 250],
+        color='black',
+        label='TDP',
+        linestyle='--',
+        linewidth=1.0)
+
+    for i in range(len(dram_54q)):
+        if dram_54q[i] > 0:
+            ax2.text(
+                xs[i],
+                pow_54q[i] - 60,
+                f'{int(dram_54q[i] * 100)}%',
+                ha='center',
+                fontsize=6,
+                rotation=90,
+                zorder=999)
+
+    ax2.set_title('54 Queues Power (W)', fontsize=8)
+    ax2.set_xlabel('Payload Size (KB)', fontsize=8)
+
+
+    plt.tight_layout()
+
