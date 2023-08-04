@@ -88,6 +88,10 @@ __device__ int read_l2(int * src, int i) {
     return acc;
 }
 
+__device__ inline void membar() {
+    asm volatile ("membar.gl;");
+}
+
 struct Pipeline {
     static const size_t mblk = PLKB * 4; // divide by 4 for payload size
     static const size_t n = 64;
@@ -125,6 +129,7 @@ __device__ void sender(Pipeline::Queue& q, int NI) {
     for (int i = 0; i < NI; i++) {
         int * ptr = q.write_wait(i).as_ptr();
         write_l2<M, N, NW>(ptr, i);
+        // asm volatile ("membar.gl;");
         __syncthreads();
         q.write_commit(i);
     }
@@ -136,6 +141,7 @@ __device__ int receiver(Pipeline::Queue& q, int NI) {
     for (int i = 0; i < NI; i++) {
         int * ptr = q.read_wait(i).as_ptr();
         acc += read_l2<M, N, NW>(ptr, i);
+        // asm volatile ("membar.gl;");
         __syncthreads();
         q.read_commit(i);
     }
