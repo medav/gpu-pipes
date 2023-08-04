@@ -56,7 +56,7 @@ def dataflow_speedup(gpu : str):
 
 def fastq_speedup(gpu : str):
     gpu_baseline_gflops = a100_baseline_gflops * (mem_bw[gpu] / mem_bw['A100'])
-    return 0.7 * fp16_tflops[gpu] * 1000 / gpu_baseline_gflops
+    return 0.53 * fp16_tflops[gpu] * 1000 / gpu_baseline_gflops
 
 np.set_printoptions(linewidth=np.inf, precision=2)
 for gpu in gpu_names:
@@ -70,8 +70,8 @@ for gpu in gpu_names:
     print()
 
 
-with figure(TEXT_WIDTH, 2, 1, len(gpu_names), name='crossgpu_apps') as (fig, axs):
-    lims = [5, 15, 8, 15, 25, 16]
+with figure(COL_WIDTH, 2, 1, 3, name='crossgpu_apps_ampere') as (fig, axs):
+    lims = [8, 8, 8]
 
     for i, ax in enumerate(axs):
         gpu_name = gpu_names[i]
@@ -101,14 +101,51 @@ with figure(TEXT_WIDTH, 2, 1, len(gpu_names), name='crossgpu_apps') as (fig, axs
                 ncol=1,
                 loc='upper right',
                 framealpha=1.0,
-                bbox_to_anchor=(1.25, 1.08),
+                bbox_to_anchor=(0.92, 1.08),
                 facecolor='#FFFFFF',
                 edgecolor='#000000')
 
-
-    # fig.align_ylabels(axs)
     plt.tight_layout()
     plt.subplots_adjust(wspace=0.3)
+
+with figure(COL_WIDTH, 2, 1, len(gpu_names) // 2, name='crossgpu_apps_hopper') as (fig, axs):
+    lims = [16, 16, 16]
+
+    for i, ax in enumerate(axs):
+        gpu_name = gpu_names[i + 3]
+
+        dataflow = dataflow_speedup(gpu_name)
+        fastqs = fastq_speedup(gpu_name)
+
+        stacked_multibars(
+            ax,
+            app_names,
+            ['DF', 'FQ'],
+            np.array([dataflow, fastqs]),
+            baseline=True,
+            labeloverflow=True,
+            ylim=lims[i],
+            overflow_ypos_pct=0.90,
+            locator_bins=4
+        )
+
+        ax.set_title(gpu_name, fontsize=8)
+
+        ax.tick_params(labelsize=6)
+
+        if i + 3 == 5:
+            ax.legend(
+                fontsize=6,
+                ncol=1,
+                loc='upper right',
+                framealpha=1.0,
+                bbox_to_anchor=(0.92, 1.08),
+                facecolor='#FFFFFF',
+                edgecolor='#000000')
+
+    plt.tight_layout()
+    plt.subplots_adjust(wspace=0.3)
+
 
 
 with figure(COL_WIDTH, 6, len(app_names), 2, name='crossgpu_gpu', sharex=True) as (fig, axs):
