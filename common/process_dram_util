@@ -1,0 +1,54 @@
+#!/usr/bin/env python
+import fileinput
+import numpy as np
+import re
+
+name_regex = r'(.*) \(\d+, \d+, \d+\)x\(\d+, \d+, \d+\), Context \d+, Stream \d+, Device \d+, .*'
+
+exclude_list = {
+    'distribution_elementwise',
+    'FillFunctor'
+}
+
+def should_exclude(kern_name : str):
+    for name_frag in exclude_list:
+        if name_frag in kern_name: return True
+
+    return False
+
+cur_kern_name = None
+cur_kern_time = None
+cur_kern_dram = None
+
+def parse_kern_time_ms(line : str):
+    [_, unit, val] = line.split()
+    if unit == 'msecond': return float(val)
+    elif unit == 'usecond': return float(val) / 1000
+    else: assert False
+
+
+records = []
+
+for line in fileinput.input():
+    if line.startswith('  ') and not line.startswith('   '):
+        cur_kern_name = line.strip()
+
+    if line.startswith('    gpu__time_duration.sum'):
+        cur_kern_time = parse_kern_time_ms(line)
+
+    if line.startswith('    gpu__dram_throughput.avg.pct_of_peak_sustained_elapsed'):
+        cur_kern_dram = float(line.split()[2])
+
+    if len(line.strip()) == 0 and cur_kern_name is not None:
+        if not should_exclude(cur_kern_name):
+            m = re.match(name_regex, cur_kern_name)
+            assert m is not None
+            print(m.group(1))
+            # print(f'{cur_kern_name} {cur_kern_time:.3f} {cur_kern_dram:.2f}')
+            # records.append((cur_kern_time, cur_kern_dram))
+
+
+# data = np.array(records)
+# weighted_avg_dram = np.average(data[:, 1], weights=data[:, 0])
+
+# print(f'Weighted avg DRAM: {weighted_avg_dram:.2f} %')
