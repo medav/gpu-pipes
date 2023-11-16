@@ -1,6 +1,5 @@
+from .common import *
 
-
-# nb, nw, nv
 cont_1 = {
     (1, 4, 1):       25188126,
     (2, 4, 2):       50873944,
@@ -63,22 +62,6 @@ cont_108 = {
     (108, 4, 1): 269999264,
 }
 
-def lookup(nblocks : int, nwarps : int, nvars : int) -> float:
-    return data_lookup[(nblocks, nwarps, nvars)]
-
-import numpy as np
-from matplotlib import pyplot as plt
-import itertools
-
-colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
-COL_WIDTH = (8.5 - 1.5 - 0.25) / 2
-TEXT_WIDTH = 8.5 - 1.5
-
-global_nvs = np.array([1, 3, 6, 13, 27, 54, 108])
-global_nbs = np.array([1, 6, 27, 108])
-
-fig, ax = plt.subplots(figsize=(COL_WIDTH, 2))
-
 tables = {
     1: cont_1,
     2: cont_2,
@@ -90,6 +73,42 @@ tables = {
     108: cont_108,
 }
 
+
+l2bw = np.array([
+    [0.72,  39.94,   8.53,  438.20],
+    [1.46,  72.09,   16.7,  883.14],
+    [2.61,  143.01,  39.69, 1269.00],
+    [6.65,  347.10,  32.45, 2083.50],
+    [9.88,  527.12,  38.39, 2144.97],
+    [20.56, 1011.64, 37.79, 2347.11],
+    [39.27, 1553.40, 45.06, 2535.68],
+    [42.67, 2005.75, 49.52, 2843.55],
+    [51.87, 2060.69, 53.51, 2293.20],
+    [54.09, 1254.44, 54.8,  1381.43],
+    [55.89, 1248.38, 57.1,  1321.99],
+    [57.15, 1247.80, 57.58, 1330.54],
+])
+
+num_prod_cons = np.array([1, 27])
+
+payload_kb = np.array([
+    1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048
+])
+
+print('1 Queues')
+for i, x in enumerate(l2bw[:, 2] / l2bw[:, 0]):
+    print(f'{payload_kb[i]}KB: {x:.2f}x')
+print()
+print('54 Queues')
+for i, x in enumerate(l2bw[:, 3] / l2bw[:, 1]):
+    print(f'{payload_kb[i]}KB: {x:.2f}x')
+
+
+labels = np.array([
+    1, 4, 16, 64, 256, 1024
+])
+
+fig, (ax1, ax2) = plt.subplots(nrows=2, figsize=(COL_WIDTH, 3.0))
 
 for cont in [1, 2, 4, 16, 64, 108]:
     keys = np.array([
@@ -110,21 +129,17 @@ for cont in [1, 2, 4, 16, 64, 108]:
     print(x_points)
     print(y_points)
 
-    ax.plot(x_points, y_points / 1e6, label=f'{cont}x', marker='o')
+    ax1.plot(x_points, y_points / 1e6, label=f'{cont}x', marker='^')
 
-plt.semilogx()
-# plt.loglog()
+ax1.semilogx()
+ax1.set_xlabel('# Variables', fontsize=8)
+ax1.set_xticks([1, 2, 4, 8, 16, 32, 64, 108], [1, 2, 4, 8, 16, 32, 64, 108])
+ax1.set_ylabel('Mega-atomicAdd / sec \n per threadblock', fontsize=8)
+ax1.set_ylim([0, 4*3.2e7 / 1e6])
+ax1.tick_params(labelsize=8)
 
-plt.xlabel('# Variables', fontsize=8)
-plt.xticks([1, 2, 4, 8, 16, 32, 64, 108], [1, 2, 4, 8, 16, 32, 64, 108], fontsize=8)
 
-plt.ylabel('atomicAdd / sec (Millions) \n per threadblock', fontsize=8)
-plt.yticks(fontsize=8)
-plt.ylim([0, 4*3.2e7 / 1e6])
-
-# plt.title('Performance of atomicAdd', fontsize=10)
-
-plt.legend(
+ax1.legend(
     fontsize=6,
     ncol=6,
     loc='upper center',
@@ -133,7 +148,20 @@ plt.legend(
     columnspacing=1,
     handlelength=1.5,
     frameon=False)
+
+ax2.plot([1, 2048], [1555, 1555], '--', color='black', label='HBM BW')
+ax2.plot([379, 379], [0, 3000], '--', color='red', label='L2 Cap')
+ax2.plot(payload_kb, l2bw[:, 1], label=f'54 Q w/s', marker='o', markersize=4)
+ax2.plot(payload_kb, l2bw[:, 3], label=f'54 Q NS', marker='o', markersize=4)
+ax2.legend(fontsize=6, ncol=2, loc='lower right')
+ax2.set_ylim(0, 3000)
+ax2.tick_params(axis='y', labelsize=8)
+ax2.set_ylabel('Bandwidth (GB/s)', fontsize=8)
+ax2.semilogx(base=2)
+ax2.legend(fontsize=6, ncol=2, loc='lower right')
+ax2.set_xlabel('Payload Size (KB)', fontsize=8)
+ax2.set_xticks(labels, labels)
+ax2.tick_params(labelsize=8)
+
 plt.tight_layout()
-plt.savefig('atomics.pdf')
-
-
+plt.savefig('atomics-qperf.pdf')

@@ -51,7 +51,7 @@ def dataflow_speedup(gpu : str):
 
 def fastq_speedup(gpu : str):
     gpu_baseline_gflops = a100_baseline_gflops * (mem_bw[gpu] / mem_bw['A100'])
-    return 0.53 * fp16_tflops[gpu] * 1000 / gpu_baseline_gflops
+    return 0.62 * fp16_tflops[gpu] * 1000 / gpu_baseline_gflops
 
 np.set_printoptions(linewidth=np.inf, precision=2)
 for gpu in ['A100']:
@@ -61,7 +61,7 @@ for gpu in ['A100']:
     fastqs = np.append(fastqs, gmean(fastqs))
     print(f'{gpu}:')
     for i, app in enumerate(app_names + ['GM']):
-        print(f'    {app}: {dataflow[i]:.2f} {fastqs[i]:.2f} {fastqs[i] / dataflow[i]:.2f}')
+        print(f'    {app.ljust(8)}: {dataflow[i]:.2f} {fastqs[i]:.2f} {fastqs[i] / dataflow[i]:.2f}')
     print()
 
 

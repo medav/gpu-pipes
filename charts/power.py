@@ -10,32 +10,34 @@ dram_54q = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0.33, 0.73, 0.74, 0.75])
 
 
 
-with figure(COL_WIDTH, 2, 1, 2) as (fig, (ax1, ax2)):
-    labels = list(map(lambda s: f'{s} KB', payload_kb))
-    bars(
-        ax1,
-        payload_kb,
-        pow_1q,
-        ylim=100,
-        intylabels=True,
-        locator_bins=8,
-        labeloverflow=True,
-        color=colors[4],
-        baseline=True)
+with figure(COL_WIDTH, 1.5, 1, 1) as (fig, ax2):
+    labels = ['1K', '', '4K', '', '16K', '', '64K', '', '256K', '', '1M', '']
+    # bars(
+    #     ax1,
+    #     payload_kb,
+    #     pow_1q,
+    #     ylim=100,
+    #     intylabels=True,
+    #     locator_bins=8,
+    #     labeloverflow=True,
+    #     color=colors[4],
+    #     baseline=True)
 
-    ax1.set_title('1 Queue Power (W)', fontsize=8)
-    ax1.set_xlabel('Payload Size (KB)', fontsize=8)
+    # ax1.set_title('1 Queue Power (W)', fontsize=8)
+    # ax1.set_xlabel('Payload Size (KB)', fontsize=8)
 
     xs = bars(
         ax2,
-        payload_kb,
+        labels,
         pow_54q,
         ylim=300,
+        labelrot=0,
         intylabels=True,
         labeloverflow=True,
-        locator_bins=8,
-        color=colors[9],
-        baseline=True)
+        locator_bins=4,
+        color=colors[4],
+        baseline=True,
+        hatch='///')
 
     ax2.plot(
         list(ax2.get_xlim()),
@@ -49,16 +51,18 @@ with figure(COL_WIDTH, 2, 1, 2) as (fig, (ax1, ax2)):
         if dram_54q[i] > 0:
             ax2.text(
                 xs[i],
-                pow_54q[i] - 60,
+                pow_54q[i] - 80,
                 f'{int(dram_54q[i] * 100)}%',
                 ha='center',
-                fontsize=6,
+                color='white',
+                weight="bold",
+                fontsize=8,
                 rotation=90,
                 zorder=999)
 
-    ax2.set_title('54 Queues Power (W)', fontsize=8)
-    ax2.set_xlabel('Payload Size (KB)', fontsize=8)
-
+    # ax2.set_title('54 Queues Power (W)', fontsize=8)
+    ax2.set_ylabel('Power (W)', fontsize=8)
+    # ax2.tick_params(labelsize=6)
 
     plt.tight_layout()
 

@@ -33,12 +33,15 @@ def bars(
     labeloverflow=False,
     labelrot=90,
     color=colors[0],
-    intylabels=True
+    intylabels=True,
+    barlabel=None,
+    zorder=None,
+    hatch=None
 ):
     nbars = len(data)
     xs = np.arange(nbars)
 
-    ax.bar(xs, data, bar_width, color=color, label=None)
+    ax.bar(xs, data, bar_width, color=color, label=barlabel, zorder=zorder, hatch=hatch, alpha=.99)
 
     if baseline:
         ax.plot(
@@ -54,8 +57,61 @@ def bars(
                 ax.text(
                     xs[i],
                     ylim * 0.92,
-                    f'{int(data[i])}',
+                    f'{int(np.round(data[i]))}',
                     ha='center',
+                    fontsize=6,
+                    zorder=999)
+
+    ax.set_xlim([-bar_width / 2, nbars - 1 + bar_width / 2])
+    if ylim is not None: ax.set_ylim([0, ylim])
+    if intylabels: ax.yaxis.set_major_locator(MaxNLocator(nbins=locator_bins, integer=True))
+
+    ax.set_xticks(xs)
+    ax.set_xticklabels(labels, rotation=labelrot)
+    ax.tick_params(labelsize=8)
+
+    return xs
+
+def bars2please_forgiveme(
+    ax,
+    labels, # [N]
+    data,   # [N]
+    baseline=False,
+    baseline_y=1,
+    bar_width=0.75,
+    ylim=None,
+    locator_bins=10,
+    labeloverflow=False,
+    labelrot=90,
+    color=colors[0],
+    intylabels=True,
+    barlabel=None,
+    zorder=None,
+    hatch=None
+):
+    nbars = len(data)
+    xs = np.arange(nbars)
+
+    ax.bar(xs, data, bar_width, color=color, label=barlabel, zorder=zorder, hatch=hatch, alpha=.99)
+
+    if baseline:
+        ax.plot(
+            [-bar_width, nbars - 1 + bar_width],
+            [baseline_y, baseline_y],
+            color='black',
+            linestyle='--',
+            linewidth=1.0)
+
+    if labeloverflow:
+        for i in range(len(data)):
+            if data[i] > ylim:
+                ax.text(
+                    xs[i],
+                    ylim * 0.92,
+                    f'{int(np.round(data[i]))}',
+                    ha='center',
+                    weight='bold',
+                    color='white',
                     fontsize=6,
                     zorder=999)
 
@@ -101,7 +157,8 @@ def multibars(
             data[i, :],
             bar_width,
             color=setcolors[i],
-            label=setlabels[i])
+            label=setlabels[i],
+            alpha=.99)
 
         if labeloverflow:
             for j in range(ngrps):
@@ -109,7 +166,7 @@ def multibars(
                     ax.text(
                         xs_i[j],
                         ylim * overflow_ypos_pct,
-                        f'{int(data[i, j])}',
+                        f'{int(np.round(data[i, j]))}',
                         ha='center',
                         fontsize=6,
                         zorder=999)
@@ -147,7 +204,8 @@ def stacked_multibars(
     intylabels=True,
     set_xticks=True,
     overflow_ypos_pct=0.92,
-    locator_bins=10
+    locator_bins=10,
+    hatches=None,
 ):
     nsets = len(setlabels)
     ngrps = len(grouplabels)
@@ -157,14 +215,18 @@ def stacked_multibars(
     xs = np.arange(ngrps) * (1 * bar_width + pad_width) + bar_width / 2
     label_xs = (xs - bar_width / 2) + (1 * bar_width) / 2
 
-    for i in range(nsets):
+    if hatches is None: hatches = [None] * nsets
+
+    for i in range(nsets - 1, -1, -1):
         ax.bar(
             xs,
             data[i, :],
             bar_width,
             color=setcolors[i],
             label=setlabels[i],
-            zorder=-i)
+            hatch=hatches[i],
+            zorder=-i,
+            alpha=.99)
 
         if labeloverflow:
             for j in range(ngrps):
@@ -172,7 +234,7 @@ def stacked_multibars(
                     ax.text(
                         xs[j],
                         ylim * overflow_ypos_pct,
-                        f'{int(data[i, j])}',
+                        f'{int(np.round(data[i, j]))}',
                         ha='center',
                         fontsize=6,
                         zorder=999)

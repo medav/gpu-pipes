@@ -56,7 +56,7 @@ def dataflow_speedup(gpu : str):
 
 def fastq_speedup(gpu : str):
     gpu_baseline_gflops = a100_baseline_gflops * (mem_bw[gpu] / mem_bw['A100'])
-    return 0.53 * fp16_tflops[gpu] * 1000 / gpu_baseline_gflops
+    return 0.62 * fp16_tflops[gpu] * 1000 / gpu_baseline_gflops
 
 np.set_printoptions(linewidth=np.inf, precision=2)
 for gpu in gpu_names:
@@ -146,7 +146,49 @@ with figure(COL_WIDTH, 2, 1, len(gpu_names) // 2, name='crossgpu_apps_hopper') a
     plt.tight_layout()
     plt.subplots_adjust(wspace=0.3)
 
+with figure(COL_WIDTH, 2, 1, 2, name='crossgpu_apps_condensed') as (fig, axs):
+    lims = [8, 16]
 
+    for i, ax in enumerate(axs):
+        gpu_name = ['A100', 'H100'][i]
+
+        dataflow = dataflow_speedup(gpu_name)
+        fastqs = fastq_speedup(gpu_name)
+
+        hatches = None
+        if gpu_name == 'A100':
+            hatches = ['///', None]
+
+        stacked_multibars(
+            ax,
+            app_names,
+            ['KitsuneSW', 'Kitsune'],
+            np.array([dataflow, fastqs]),
+            baseline=True,
+            labeloverflow=True,
+            ylim=lims[i],
+            overflow_ypos_pct=0.90,
+            locator_bins=4,
+            hatches=hatches
+        )
+
+        ax.set_title(gpu_name, fontsize=8)
+
+        ax.tick_params(labelsize=8)
+
+        if i == 1:
+            ax.legend(
+                fontsize=6,
+                ncol=1,
+                loc='upper right',
+                framealpha=1.0,
+                frameon=False,
+                # bbox_to_anchor=(0.98, 1.08),
+                facecolor='#FFFFFF',
+                edgecolor='#000000')
+
+    plt.tight_layout()
+    plt.subplots_adjust(wspace=0.3)
 
 with figure(COL_WIDTH, 6, len(app_names), 2, name='crossgpu_gpu', sharex=True) as (fig, axs):
     lims_df = [5] * 7
